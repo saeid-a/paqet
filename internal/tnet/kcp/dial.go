@@ -67,7 +67,7 @@ func Dial(addr *net.UDPAddr, cfg *conf.KCP, netCfg conf.Network) (tnet.Conn, err
 		addrString(conn.RemoteAddr()),
 		addrString(conn.LocalAddr()),
 	)
-	trackSession(conn, sess)
+	trackSession(conn, sess, metricsID)
 	return &Conn{
 		PacketConn: packetConn,
 		UDPSession: conn,

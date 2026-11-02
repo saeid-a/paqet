@@ -14,6 +14,7 @@ import (
 func resetStatsForTest() {
 	statMu.Lock()
 	sessions = make(map[*smux.Session]*kcp.UDPSession)
+	sessionMetrics = make(map[*smux.Session]uint64)
 	streamStarted = make(map[*smux.Stream]time.Time)
 	statMu.Unlock()
 }
@@ -52,7 +53,7 @@ func TestSamplePrunesClosedSessions(t *testing.T) {
 	resetStatsForTest()
 	cli, cleanup := testPipedSession(t)
 	defer cleanup()
-	trackSession(nil, cli)
+	trackSession(nil, cli, 0)
 	if got := SampleNow().NumSessions; got != 1 {
 		t.Fatalf("want 1 live session, got %d", got)
 	}
@@ -73,7 +74,7 @@ func TestSampleMaxStreamsPerConn(t *testing.T) {
 	resetStatsForTest()
 	cli, cleanup := testPipedSession(t)
 	defer cleanup()
-	trackSession(nil, cli)
+	trackSession(nil, cli, 0)
 	var streams []*smux.Stream
 	for i := 0; i < 3; i++ {
 		st, err := cli.OpenStream()
@@ -101,7 +102,7 @@ func TestSampleOldestStreamAge(t *testing.T) {
 	resetStatsForTest()
 	cli, cleanup := testPipedSession(t)
 	defer cleanup()
-	trackSession(nil, cli)
+	trackSession(nil, cli, 0)
 	st, err := cli.OpenStream()
 	if err != nil {
 		t.Fatalf("open: %v", err)

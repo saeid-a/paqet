@@ -26,17 +26,21 @@ type Sample struct {
 }
 
 var (
-	statMu        sync.RWMutex
-	sessions      = make(map[*smux.Session]*kcp.UDPSession)
-	streamStarted = make(map[*smux.Stream]time.Time)
+	statMu         sync.RWMutex
+	sessions       = make(map[*smux.Session]*kcp.UDPSession)
+	sessionMetrics = make(map[*smux.Session]uint64)
+	streamStarted  = make(map[*smux.Stream]time.Time)
 )
 
-func trackSession(udp *kcp.UDPSession, sess *smux.Session) {
+func trackSession(udp *kcp.UDPSession, sess *smux.Session, metricsID uint64) {
 	if sess == nil {
 		return
 	}
 	statMu.Lock()
 	sessions[sess] = udp
+	if metricsID != 0 {
+		sessionMetrics[sess] = metricsID
+	}
 	statMu.Unlock()
 }
 
@@ -46,6 +50,7 @@ func untrackSession(sess *smux.Session) {
 	}
 	statMu.Lock()
 	delete(sessions, sess)
+	delete(sessionMetrics, sess)
 	statMu.Unlock()
 }
 
@@ -80,13 +85,23 @@ func SampleNow() Sample {
 	for sess := range sessions {
 		if sess == nil || sess.IsClosed() {
 			delete(sessions, sess)
+			delete(sessionMetrics, sess)
 		}
 	}
-	smuxes := make([]*smux.Session, 0, len(sessions))
-	udps := make([]*kcp.UDPSession, 0, len(sessions))
+	type sessPair struct {
+		sess      *smux.Session
+		udp       *kcp.UDPSession
+		metricsID uint64
+	}
+	pairs := make([]sessPair, 0, len(sessions))
 	for sess, udp := range sessions {
-		smuxes = append(smuxes, sess)
-		udps = append(udps, udp)
+		pairs = append(pairs, sessPair{sess: sess, udp: udp, metricsID: sessionMetrics[sess]})
+	}
+	smuxes := make([]*smux.Session, 0, len(pairs))
+	udps := make([]*kcp.UDPSession, 0, len(pairs))
+	for _, p := range pairs {
+		smuxes = append(smuxes, p.sess)
+		udps = append(udps, p.udp)
 	}
 	var oldest time.Time
 	for _, start := range streamStarted {
@@ -110,6 +125,13 @@ func SampleNow() Sample {
 	var srtt, rto, srttVar int64
 	if live > 0 {
 		srtt, rto, srttVar = sumSRTT/live, sumRTO/live, sumVar/live
+	}
+
+	for _, p := range pairs {
+		if p.udp == nil || p.metricsID == 0 {
+			continue
+		}
+		metrics.SetConnKCP(p.metricsID, int64(p.udp.GetSRTT()))
 	}
 
 	snmp := kcp.DefaultSnmp.Copy()
