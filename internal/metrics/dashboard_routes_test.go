@@ -182,3 +182,18 @@ func TestDashboardHasProbeLab(t *testing.T) {
     if !strings.Contains(s, `kind!=="speedtest"`) { t.Fatal("runProbe must skip host/port gate for speedtest (no target param)") }
     if !strings.Contains(s, "observed") { t.Fatal("probe lab must label speedtest as observed traffic (idle tunnel reads ~0)") }
 }
+
+func TestDashboardForwardTestButton(t *testing.T) {
+	html, _ := os.ReadFile("dashboard.html")
+	s := string(html)
+	// Buttons are created via setAttribute in inline JS, so assert on the
+	// call form rather than literal HTML attributes.
+	for _, want := range []string{"listenerTest", "api/diag/dial", `"data-testid"`, `"fwd-test"`, `"fwd-test-result"`, "textContent"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	if strings.Contains(s, "innerHTML") {
+		t.Fatal("probe path must not use innerHTML (XSS)")
+	}
+}
