@@ -188,7 +188,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 
 <section id="t-conns" class="hide">
 <div class="panel"><h2>Connections</h2>
-<div class="row"><input type="text" id="q" placeholder="filter by addr, id, status…"><label class="chk"><input type="checkbox" id="connGone" checked> recently closed</label><span class="note" id="connTop"></span></div>
+<div class="row"><input type="text" id="q" placeholder="filter by addr, id, status…"><button id="bConnCsv">Export CSV</button><label class="chk"><input type="checkbox" id="connGone" checked> recently closed</label><span class="note" id="connTop"></span></div>
 <div class="wrap"><table id="connTable"><thead><tr><th data-sk="id">id</th><th data-sk="remote">remote</th><th data-sk="local">local</th><th data-sk="status">status</th><th class="n" data-sk="uptime">uptime</th><th class="n" data-sk="in">in</th><th class="n" data-sk="out">out</th><th class="n" data-sk="rin">in/s</th><th class="n" data-sk="rout">out/s</th><th class="n" data-sk="tot">tot/s</th><th class="n" data-sk="streams">streams</th></tr></thead><tbody id="connBody"></tbody></table>
 <div class="empty" id="connEmpty">no connections</div></div></div>
 </section>
@@ -196,7 +196,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <section id="t-targets" class="hide">
 <div class="panel"><h2>Targets</h2>
 <div class="row"><button id="bCsv">Export CSV</button><span class="note" id="tgtNote"></span></div>
-<div class="wrap"><table><thead><tr><th>target</th><th class="n">in</th><th class="n">out</th><th class="n">success</th><th class="n">fail</th></tr></thead><tbody id="tgtBody"></tbody></table>
+<div class="wrap"><table><thead><tr><th>target</th><th class="n">in</th><th class="n">out</th><th class="n">success</th><th class="n">fail</th><th>success-rate</th><th>avg-rtt</th></tr></thead><tbody id="tgtBody"></tbody></table>
 <div class="empty" id="tgtEmpty">no targets</div></div></div>
 <div class="panel"><h2>Listeners</h2>
 <div class="row"><button id="bLstRefresh">Refresh</button><span class="note" id="lstNote"></span></div>
@@ -431,6 +431,20 @@ tr.onclick=function(){openModal(c);};tb.appendChild(tr);})(list[i]);}
 }
 function paintConnSort(){var ths=document.querySelectorAll("#connTable th[data-sk]");for(var i=0;i<ths.length;i++){var th=ths[i];if(th.dataset.base==null)th.dataset.base=th.textContent.replace(/ [▲▼]$/,"");th.textContent=th.dataset.base+(th.dataset.sk===connSort.key?(connSort.dir<0?" ▼":" ▲"):"");}}
 try{(function(){var ths=document.querySelectorAll("#connTable th[data-sk]");for(var i=0;i<ths.length;i++){(function(th){th.onclick=function(){var k=th.dataset.sk;if(connSort.key===k)connSort.dir*=-1;else{connSort.key=k;connSort.dir=(k==="remote"||k==="local"||k==="status"||k==="id")?1:-1;}paintConnSort();applyFilter();};})(ths[i]);}paintConnSort();})();}catch(e){}
+// target health: success-rate from success/fail counters plus the average
+// rtt over live conns whose remote matches the target. Null when unknown.
+function tgtHealth(r){
+var ok=(r.ok!=null?+r.ok:(r.success!=null?+r.success:null));
+var fail=(r.fail!=null?+r.fail:(r.failure!=null?+r.failure:null));
+var rate=null;
+if(ok!=null&&fail!=null&&(ok+fail)>0)rate=ok/(ok+fail);
+var sum=0,n=0,key=String(r.name||r.target||"?");
+(connCache||[]).forEach(function(c){
+if(String(c.remote_addr||"")!==key)return;
+var v=(c.rtt_ms!=null?c.rtt_ms:(c.RttMs!=null?c.RttMs:(c.rtt!=null?c.rtt:null)));
+if(v!=null&&v!==""&&!isNaN(+v)){sum+=+v;n++;}});
+return {rate:rate,rtt:n?sum/n:null};
+}
 // targets: prefer d.targets, else aggregate connections by remote
 function renderTargets(d){
 var rows=[];
@@ -439,12 +453,18 @@ else{var m={};(d.connections||[]).forEach(function(c){var k=String(c.remote_addr
 tgtRows=rows;
 var tb=$("tgtBody");while(tb.firstChild)tb.removeChild(tb.firstChild);
 $("tgtEmpty").style.display=rows.length?"none":"block";
-for(var i=0;i<rows.length&&i<500;i++){var r=rows[i],tr=document.createElement("tr");var tds=[r.name,fmtBytes(r.bi),fmtBytes(r.bo),r.ok==null?"—":fmtInt(r.ok),r.fail==null?"—":fmtInt(r.fail)];for(var j=0;j<tds.length;j++){var td=document.createElement("td");td.textContent=tds[j];td.className=j===0?"mono":"n num";if(j===3)td.className="n num ok-t";if(j===4)td.className="n num bad-t";tr.appendChild(td);}tb.appendChild(tr);}
+for(var i=0;i<rows.length&&i<500;i++){var r=rows[i],h=tgtHealth(r),tr=document.createElement("tr");var tds=[r.name,fmtBytes(r.bi),fmtBytes(r.bo),r.ok==null?"—":fmtInt(r.ok),r.fail==null?"—":fmtInt(r.fail),h.rate==null?"—":(h.rate*100).toFixed(1)+"%",fmtMs(h.rtt)];for(var j=0;j<tds.length;j++){var td=document.createElement("td");td.textContent=tds[j];td.className=j===0?"mono":"n num";if(j===3)td.className="n num ok-t";if(j===4)td.className="n num bad-t";tr.appendChild(td);}tb.appendChild(tr);}
 }
+// shared CSV cell quoting with formula-injection guard; reused by both
+// targets and connections export handlers.
+function csvQ(s){s=String(s==null?"":s);if(/^[=+\-@]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';}
 $("bCsv").onclick=function(){
-var csvQ=function(s){s=String(s);if(/^[=+\-@]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
 var csv="target,bytes_in,bytes_out,success,fail\n";tgtRows.forEach(function(r){csv+=csvQ(r.name)+","+r.bi+","+r.bo+","+(r.ok==null?"":r.ok)+","+(r.fail==null?"":r.fail)+"\n";});
 var b=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="paqet-targets.csv";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);
+};
+$("bConnCsv").onclick=function(){
+var csv="id,remote,local,status,uptime,bytes_in,bytes_out,rate\n";(connCache||[]).forEach(function(c){csv+=csvQ(c.id)+","+csvQ(c.remote_addr)+","+csvQ(c.local_addr)+","+csvQ(c.status)+","+(+c.uptime_seconds||0)+","+(+c.bytes_in||0)+","+(+c.bytes_out||0)+","+(c._rate||0)+"\n";});
+var b=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="paqet-conns.csv";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);
 };
 function draw(){var cv=$("spark"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;ctx.clearRect(0,0,W,H);ctx.strokeStyle="#1c2438";ctx.lineWidth=1;for(var g=1;g<4;g++){var y=H*g/4;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}function line(a,color){if(!a.length)return;var mx=0,i;for(i=0;i<a.length;i++)if(a[i]>mx)mx=a[i];if(mx<=0)mx=1;ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.beginPath();for(i=0;i<a.length;i++){var x=a.length===1?W:W*i/(MAX-1),yy=H-4-(a[i]/mx)*(H-10);if(i===0)ctx.moveTo(x,yy);else ctx.lineTo(x,yy);}ctx.stroke();}line(histIn,"#34d399");line(histOut,"#60a5fa");}
 function fitCanvas(){var cv=$("spark"),r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1;cv.width=Math.max(280,r.width*d);cv.height=140*d;draw();}
