@@ -111,11 +111,16 @@ func getTLSKey() string {
 }
 
 // isAuthorized reports whether the request carries a valid bearer token.
-// When no token is configured, all requests are authorized.
+// When no token is configured, only loopback requests are authorized;
+// remote requests without a token are denied.
 func isAuthorized(r *http.Request) bool {
 	tok := getAdminToken()
 	if tok == "" {
-		return true
+		host := remoteIP(r)
+		if ip := net.ParseIP(host); ip != nil {
+			return ip.IsLoopback()
+		}
+		return host == "localhost"
 	}
 	if h := r.Header.Get("Authorization"); h != "" {
 		parts := strings.SplitN(h, " ", 2)
@@ -423,6 +428,7 @@ func configHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "cannot write config: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		_ = os.Chmod(path, 0600)
 		flog.Infof("config updated via control panel (%s)", path)
 		flog.Auditf("config updated via control panel (%s) from %s", path, remoteIP(r))
 		w.Header().Set("Content-Type", "application/json")
@@ -559,6 +565,7 @@ func configRestoreHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot restore config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	_ = os.Chmod(cfgPath, 0600)
 	flog.Infof("config restored from %s via control panel", bakPath)
 	flog.Auditf("config restored from %s to %s by %s", bakPath, cfgPath, remoteIP(r))
 	w.Header().Set("Content-Type", "application/json")

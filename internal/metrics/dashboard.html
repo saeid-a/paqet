@@ -68,7 +68,29 @@ footer{color:var(--dim);font-size:11px;text-align:center;padding:6px}
 .note.warn{color:var(--amber)}
 .frm{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-bottom:8px}
 .frm label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
-.frm input,.frm select{background:var(--inp);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-size:13px;width:100%}
+.frm input,.frm select,.frm textarea{background:var(--inp);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-size:13px;width:100%}
+.frm input:disabled,.frm select:disabled,.frm textarea:disabled{opacity:.45;cursor:default}
+.frm textarea{min-height:58px;resize:vertical;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre}
+.frm .wide{grid-column:1/-1}
+.fsec{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--line);font-weight:600}
+.fsec:first-child{margin-top:0;padding-top:0;border-top:0}
+.frm label{gap:5px}
+.frm input,.frm select,.frm textarea,.row input:not([type=checkbox]),.row select{transition:border-color .15s ease,box-shadow .15s ease}
+.frm input:focus,.frm select:focus,.frm textarea:focus,.row input:not([type=checkbox]):focus,.row select:focus{outline:none;border-color:var(--blu);box-shadow:0 0 0 3px rgba(96,165,250,.22)}
+.frm select,.row select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238b94a9' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+button{transition:border-color .15s ease,background-color .15s ease,transform .05s ease}
+button:active{transform:translateY(1px)}
+button:focus-visible{outline:none;border-color:var(--blu);box-shadow:0 0 0 3px rgba(96,165,250,.22)}
+::selection{background:rgba(96,165,250,.35)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:rgba(139,148,169,.35);border-radius:6px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-track{background:transparent}
+*{scrollbar-width:thin;scrollbar-color:rgba(139,148,169,.45) transparent}
+.sugg{position:fixed;z-index:70;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,.45);padding:4px;max-height:220px;overflow-y:auto;min-width:200px}
+.sugg .opt{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;font-size:13px;color:var(--fg);cursor:pointer}
+.sugg .opt .v{font-weight:600}
+.sugg .opt .d{margin-left:auto;font-size:11px;color:var(--dim)}
+.sugg .opt.on,.sugg .opt:hover{background:rgba(96,165,250,.14)}
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
 #modalBox{background:var(--panel);border:1px solid var(--line);border-radius:8px;max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column}
 #modalHead{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px}
@@ -157,17 +179,61 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <p style="font-size:12px;color:var(--dim);margin-top:6px">Saving validates YAML first. Restart is required to apply changes.</p>
 </div>
 <div id="c-form" class="hide">
+<div class="fsec">General</div>
 <div class="frm">
-<label>role<select id="fRole"><option value="">—</option><option value="client">client</option><option value="server">server</option><option value="relay">relay</option></select></label>
+<label>role<select id="fRole"><option value="">—</option><option value="client">client</option><option value="server">server</option></select></label>
+<label>log level<select id="fLevel"><option value="">—</option><option value="none">none</option><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option><option value="fatal">fatal</option></select></label>
+</div>
+<div class="fsec">Control panel (admin)</div>
+<div class="frm">
+<label>admin<select id="fAdminEn" title="enable the web UI + status API"><option value="">—</option><option value="true">enabled</option><option value="false">disabled</option></select></label>
 <label>admin listen<input type="text" id="fListen" placeholder="127.0.0.1:9090"></label>
-<label>log level<select id="fLevel"><option value="">—</option><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select></label>
+<label>auth token<input type="text" id="fToken" placeholder="min 16 chars (optional)" class="mono" title="bearer token for /api/*, at least 16 characters"></label>
+<label>tls cert path<input type="text" id="fTlsCert" placeholder="/path/to/cert.pem (optional)"></label>
+<label>tls key path<input type="text" id="fTlsKey" placeholder="/path/to/key.pem (optional)"></label>
+</div>
+<div class="fsec">Endpoints</div>
+<div class="frm">
+<label class="only-client">server addr (client)<input type="text" id="fSrvAddr" placeholder="10.0.0.100:9999" title="paqet server address (client mode)"></label>
+<label class="only-server">listen addr (server)<input type="text" id="fLstnAddr" placeholder=":9999" title="server listen address (server mode)"></label>
+<label class="wide only-client">socks5 listeners (one per line: listen [username] [password])<textarea id="fSocks" rows="3" placeholder="127.0.0.1:1080"></textarea></label>
+<label class="wide only-client">forward rules (one per line: listen -&gt; target [protocol])<textarea id="fFwds" rows="3" placeholder="127.0.0.1:8080 -&gt; 127.0.0.1:80 tcp"></textarea></label>
+</div>
+<div class="fsec">Network (pcap)</div>
+<div class="frm">
 <label>interface<select id="fIface"><option value="">loading…</option></select></label>
+<label>guid (windows npcap)<input type="text" id="fGuid" placeholder="\Device\NPF_{...}"></label>
+<label>ipv4 addr<input type="text" id="fV4Addr" placeholder="192.168.1.100:0"></label>
+<label>ipv4 router mac<input type="text" id="fV4Mac" placeholder="aa:bb:cc:dd:ee:ff" class="mono"></label>
+<label>ipv6 addr<input type="text" id="fV6Addr" placeholder="[2001:db8::1]:0"></label>
+<label>ipv6 router mac<input type="text" id="fV6Mac" placeholder="aa:bb:cc:dd:ee:ff" class="mono"></label>
+<label>pcap sockbuf (bytes)<input type="number" id="fSockbuf" min="1024" max="104857600" placeholder="4194304"></label>
+<label>tcp handshake<select id="fHandshake" title="fake 3-way handshake to prime stateful NAT/firewalls"><option value="">—</option><option value="true">enabled</option><option value="false">disabled</option></select></label>
+<label>tcp local flags<input type="text" id="fLocalFlag" placeholder="PA" autocomplete="off" title="comma-separated flag combos, e.g. PA or PA,SA"></label>
+<label>tcp remote flags<input type="text" id="fRemoteFlag" placeholder="PA" autocomplete="off" title="comma-separated flag combos, e.g. PA or PA,SA"></label>
+</div>
+<div class="fsec">Transport (kcp)</div>
+<div class="frm">
+<label>protocol<select id="fProto"><option value="">—</option><option value="kcp">kcp</option></select></label>
+<label>connections<input type="number" id="fConn" min="1" max="256" placeholder="1"></label>
 <label>kcp preset<select id="fKcp"><option value="">—</option><option value="normal">normal</option><option value="fast">fast</option><option value="fast2">fast2</option><option value="fast3">fast3</option><option value="manual">manual</option></select></label>
-<label>mtu<input type="number" id="fMtu" min="68" max="9000" placeholder="1350"></label>
-<label>wnd snd<input type="number" id="fWndS" min="1" max="4096" placeholder="128"></label>
-<label>wnd rcv<input type="number" id="fWndR" min="1" max="4096" placeholder="128"></label>
-<label>block cipher<select id="fBlock"><option value="">—</option><option value="aes">aes</option><option value="sm4">sm4</option><option value="none">none</option></select></label>
-<label>key<input type="text" id="fKey" placeholder="hex secret" class="mono"></label>
+<label>mtu<input type="number" id="fMtu" min="50" max="1500" placeholder="1350"></label>
+<label>wnd snd<input type="number" id="fWndS" min="1" max="32768" placeholder="128"></label>
+<label>wnd rcv<input type="number" id="fWndR" min="1" max="32768" placeholder="512"></label>
+<label>nodelay (manual)<input type="number" id="fNodelay" min="0" max="1" placeholder="1"></label>
+<label>interval ms (manual)<input type="number" id="fInterval" min="10" max="5000" placeholder="10"></label>
+<label>resend (manual)<input type="number" id="fResend" min="0" max="2" placeholder="2"></label>
+<label>nocongestion (manual)<input type="number" id="fNoCong" min="0" max="1" placeholder="1"></label>
+<label>wdelay (manual)<select id="fWdelay"><option value="">—</option><option value="true">true (batch, higher throughput)</option><option value="false">false (flush, lower latency)</option></select></label>
+<label>acknodelay (manual)<select id="fAckNodelay"><option value="">—</option><option value="true">true (lower latency)</option><option value="false">false (more efficient)</option></select></label>
+<label>fec data shards<input type="number" id="fDshard" min="1" max="255" placeholder="10"></label>
+<label>fec parity shards<input type="number" id="fPshard" min="1" max="255" placeholder="3"></label>
+<label>smux buffer (bytes)<input type="number" id="fSmuxbuf" min="1024" placeholder="4194304"></label>
+<label>stream buffer (bytes)<input type="number" id="fStreambuf" min="1024" placeholder="2097152"></label>
+<label>smux keepalive (s)<input type="number" id="fKalive" min="1" placeholder="2"></label>
+<label>smux keepalive timeout (s)<input type="number" id="fKtimeout" min="1" placeholder="8"></label>
+<label>block cipher<select id="fBlock"><option value="">—</option><option value="aes">aes</option><option value="aes-128">aes-128</option><option value="aes-128-gcm">aes-128-gcm</option><option value="aes-192">aes-192</option><option value="salsa20">salsa20</option><option value="blowfish">blowfish</option><option value="twofish">twofish</option><option value="cast5">cast5</option><option value="3des">3des</option><option value="tea">tea</option><option value="xtea">xtea</option><option value="xor">xor</option><option value="sm4">sm4</option><option value="none">none</option><option value="null">null</option></select></label>
+<label>key<input type="text" id="fKey" placeholder="secret (must match peer)" class="mono"></label>
 </div>
 <div class="row">
 <button id="bGenKey">Generate Secret</button>
@@ -221,13 +287,17 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <script>
 "use strict";
 var $=function(id){return document.getElementById(id);};
-var histIn=[],histOut=[],MAX=60,connCache=[],prev=null,seq=0,logCache=[],sseLive=false,sseTried=false,tgtRows=[];
+var histIn=[],histOut=[],MAX=60,connCache=[],seq=0,logCache=[],sseLive=false,sseTried=false,tgtRows=[];
+var WINDOW_MS=10000,winIn=[],winOut=[],winPin=[],winPout=[];
 function setT(id,t){var e=$(id);if(e)e.textContent=t;}
 function fmtInt(n){n=+n||0;return n.toLocaleString("en-US");}
-function fmtBytes(n){n=+n||0;if(n<1024)return n+" B";var u=["KB","MB","GB","TB","PB"],i=-1;do{n/=1024;i++;}while(n>=1024&&i<u.length-1);return n.toFixed(2)+" "+u[i];}
+function fmtBytes(n){n=+n||0;if(n<1024)return parseFloat(n.toFixed(2))+" B";var u=["KB","MB","GB","TB","PB"],i=-1;do{n/=1024;i++;}while(n>=1024&&i<u.length-1);return n.toFixed(2)+" "+u[i];}
 function fmtRate(n){return fmtBytes(n)+"/s";}
 function fmtPktRate(n){n=+n||0;if(n<1000)return n.toFixed(2)+" pkt/s";var u=["k","M","G"],i=-1;do{n/=1000;i++;}while(n>=1000&&i<u.length-1);return n.toFixed(2)+" "+u[i]+" pkt/s";}
-function inst(d,key,fb){var v=+d[key]||0,now=Date.now(),out=+fb||0;if(prev&&now>prev.t){var dt=(now-prev.t)/1000;if(dt>0)out=Math.max(0,(v-prev[key])/dt);}return out;}
+// 10s sliding-window rate: (newest-oldest cumulative)/span. One empty 2s
+// poll no longer snaps the display to 0 while the window still holds
+// earlier traffic; true idle still reads 0 once the window drains.
+function winRate(win,v,now,fb){v=+v||0;fb=+fb||0;now=+now||Date.now();var last=win.length?win[win.length-1]:null;if(last&&v<last.v)win.length=0;win.push({t:now,v:v});while(win.length>1&&now-win[0].t>WINDOW_MS)win.shift();if(win.length<2)return fb;var o=win[0],n=win[win.length-1],dt=(n.t-o.t)/1000;if(!(dt>0))return fb;return Math.max(0,(n.v-o.v)/dt);}
 function fmtDur(s){s=Math.max(0,Math.floor(+s||0));if(s<60)return s+"s";var m=Math.floor(s/60);if(m<60)return m+"m "+(s%60)+"s";var h=Math.floor(m/60);if(h<48)return h+"h "+(m%60)+"m";return Math.floor(h/24)+"d "+(h%24)+"h";}
 function notice(msg,ok){var e=$("notice");if(!msg){if(!e.dataset.sticky){e.className="mono";e.style.display="none";}return;}e.className="mono "+(ok?"ok":"err");e.style.display="block";e.textContent=msg;}
 function markOk(ok,running,msg){
@@ -268,7 +338,7 @@ tr.onclick=function(){openModal(c);};tb.appendChild(tr);})(list[i]);}
 // targets: prefer d.targets, else aggregate connections by remote
 function renderTargets(d){
 var rows=[];
-if(d&&Array.isArray(d.targets)){rows=d.targets.map(function(t){return{name:String(t.target||t.name||t.addr||"?"),bi:+t.bytes_in||0,bo:+t.bytes_out||0,ok:t.success!=null?t.success:(+t.success_total||0),fail:t.fail!=null?t.fail:(+t.failure_total||0)};});setT("tgtNote","");}
+if(d&&Array.isArray(d.targets)){rows=d.targets.map(function(t){return{name:String(t.target||t.name||t.addr||"?"),bi:+t.bytes_in||0,bo:+t.bytes_out||0,ok:(t.success!=null?+t.success:0),fail:(t.failure!=null?+t.failure:(t.fail!=null?+t.fail:0))};});setT("tgtNote","");}
 else{var m={};(d.connections||[]).forEach(function(c){var k=String(c.remote_addr||"?");var e=m[k]||(m[k]={name:k,bi:0,bo:0,ok:null,fail:null,n:0});e.bi+=+c.bytes_in||0;e.bo+=+c.bytes_out||0;e.n++;});Object.keys(m).forEach(function(k){rows.push(m[k]);});setT("tgtNote",rows.length?"aggregated from connections (no per-target API)":"no target data (endpoint unavailable)");}
 tgtRows=rows;
 var tb=$("tgtBody");while(tb.firstChild)tb.removeChild(tb.firstChild);
@@ -293,10 +363,9 @@ lastStatus=d;
 setT("role",String(d.role||"unknown"));setT("uptime",(d.running?"● running · ":"○ stopped · ")+fmtDur(d.uptime_seconds));
 setT("ver",(d.build&&d.build.version?d.build.version:"")+(d.build&&d.build.git_commit?" ("+String(d.build.git_commit).slice(0,7)+")":""));
 setT("cfgPath",(d.config_path||"")+(d.build&&d.build.platform?" · "+d.build.platform:""));setT("cfgPath2",d.config_path||"");
-var up=+d.uptime_seconds||0,fbPin=up>0?(+d.packets_in||0)/up:0,fbPout=up>0?(+d.packets_out||0)/up:0;
-var rIn=inst(d,"bytes_in",d.bytes_in_per_sec),rOut=inst(d,"bytes_out",d.bytes_out_per_sec);
-var rPin=inst(d,"packets_in",fbPin),rPout=inst(d,"packets_out",fbPout);
-prev={t:Date.now(),bytes_in:+d.bytes_in||0,bytes_out:+d.bytes_out||0,packets_in:+d.packets_in||0,packets_out:+d.packets_out||0};
+var now=Date.now(),up=+d.uptime_seconds||0,fbPin=up>0?(+d.packets_in||0)/up:0,fbPout=up>0?(+d.packets_out||0)/up:0;
+var rIn=winRate(winIn,d.bytes_in,now,d.bytes_in_per_sec),rOut=winRate(winOut,d.bytes_out,now,d.bytes_out_per_sec);
+var rPin=winRate(winPin,d.packets_in,now,fbPin),rPout=winRate(winPout,d.packets_out,now,fbPout);
 setT("tIn",fmtRate(rIn));setT("tOut",fmtRate(rOut));
 setT("tInTot","total "+fmtBytes(d.bytes_in));setT("tOutTot","total "+fmtBytes(d.bytes_out));
 setT("pIn",fmtInt(d.packets_in));setT("pOut",fmtInt(d.packets_out));
@@ -306,7 +375,7 @@ setT("lgIn",fmtRate(rIn));setT("lgOut",fmtRate(rOut));setT("ts",String(d.timesta
 // runtime card: tolerate missing fields
 var rt=d.runtime||d.sys||{},go=pick(d,"goroutines","num_goroutine",0)||pick(rt,"goroutines","num_goroutine","n");
 setT("rtGo",(go==null||go==="")?"—":fmtInt(go)+" threads");
-var mem=pick(rt,"mem_alloc","alloc","heap_alloc","mem_bytes",0)||pick(d,"mem_alloc","alloc",0);
+var mem=pick(rt,"mem_alloc_bytes","mem_alloc","alloc","heap_alloc","mem_bytes",0)||pick(d,"mem_alloc_bytes","mem_alloc","alloc",0);
 setT("rtMem",(mem==null||+mem<=0)?"heap —":("heap "+fmtBytes(mem)));
 // kcp card: tolerate missing fields
 var k=d.kcp||{};
@@ -342,29 +411,246 @@ if(o.ok){cfgMsg("saved — restart to apply",true);lastCfg=$("cfg").value;if(res
 else{cfgMsg("validation failed: "+(o.j.error||("http "+o.st)),false);}}).catch(function(e){cfgMsg("save failed: "+e.message,false);});
 }
 $("bCfgLoad").onclick=function(){loadCfg(true);};$("bCfgSave").onclick=function(){saveCfg(false);};$("bCfgSaveRestart").onclick=function(){saveCfg(true);};
-// form: parse minimal keys from yaml, serialize back
-function yamlGet(y,key){var m=y.match(new RegExp("^\\s*"+key+"\\s*:\\s*(.+?)\\s*$","m"));return m?m[1].replace(/^["']|["']$/g,""): "";}
-function yamlSet(y,key,val){if(val===""||val==null)return y;var re=new RegExp("^(\\s*"+key+"\\s*:\\s*).*$","m");if(re.test(y))return y.replace(re,function(m,p1){return p1+val;});return y;}
+// form: indent-aware nested YAML get/set (no YAML lib on page), plus
+// list-section editors for socks5/forward.
+function yStripVal(v){v=String(v==null?"":v).trim();if(!v||v[0]==="#")return "";if(v[0]==='"'||v[0]==="'"){var q=v[0],e=v.indexOf(q,1);return e>0?v.slice(1,e):v.slice(1);}var h=v.search(/\s+#/);if(h>=0)v=v.slice(0,h).trim();return v.replace(/^["']|["']$/g,"");}
+function yWalk(y){var out=[],lines=String(y||"").split("\n"),stack=[];for(var i=0;i<lines.length;i++){var m=lines[i].match(/^(\s*)(?:-\s+)?([^#\s][^:]*):(.*)$/);if(!m)continue;var ind=m[1].length,key=m[2].trim();while(stack.length&&ind<=stack[stack.length-1].ind)stack.pop();out.push({ind:ind,path:stack.map(function(s){return s.key;}).concat([key]),idx:i,val:yStripVal(m[3])});stack.push({ind:ind,key:key});}return out;}
+function yFind(w,path){for(var i=0;i<w.length;i++){var p=w[i].path;if(p.length!==path.length)continue;var ok=true;for(var k=0;k<p.length;k++)if(p[k]!==path[k]){ok=false;break;}if(ok)return w[i];}return null;}
+function yGet(y,path){var f=yFind(yWalk(y),path);return f?f.val:"";}
+function yQuote(s){s=String(s);if(/^(true|false|null|~|\d+(\.\d+)?)$/.test(s))return s;if(/^[A-Za-z0-9_.\-\/]+$/.test(s))return s;return '"'+s.replace(/\\/g,"\\\\").replace(/"/g,'\\"')+'"';}
+function ySpaces(n){var s="";while(s.length<n)s+=" ";return s;}
+function ySet(y,path,val,literal){
+if(val===""||val==null)return y;
+var raw=literal?String(val):(/^(true|false|\d+(\.\d+)?)$/.test(String(val))?String(val):yQuote(String(val)));
+var lines=String(y||"").split("\n"),f=yFind(yWalk(y),path);
+if(f){
+var ln=lines[f.idx],pm=ln.match(/^(\s*(?:-\s+)?[^:]+:\s*)/),prefix=pm?pm[1]:ln.split(":")[0]+": ";
+if(prefix[prefix.length-1]!==" "&&prefix[prefix.length-1]!=="\t")prefix+=" ";
+var after=ln.slice(prefix.length),comment="";
+if(after&&(after[0]==='"'||after[0]==="'")){var q=after[0],e=after.indexOf(q,1),rest=e>=0?after.slice(e+1):"",c1=rest.match(/(\s+#.*)$/);if(c1)comment=c1[1];}
+else{var c2=after.match(/(\s+#.*)$/);if(c2)comment=c2[1];}
+lines[f.idx]=prefix+raw+comment;
+return lines.join("\n");
+}
+var cur=String(y||"");
+for(var d=1;d<=path.length;d++){
+var pre=path.slice(0,d);
+if(yFind(yWalk(cur),pre))continue;
+var ls=cur.split("\n");
+if(pre.length===1){if(cur&&cur[cur.length-1]!=="\n")cur+="\n";cur+=pre[0]+":\n";continue;}
+var pw=yWalk(cur),pp=pre.slice(0,d-1),pe=yFind(pw,pp);
+if(!pe){if(cur&&cur[cur.length-1]!=="\n")cur+="\n";cur+=pre[pre.length-1]+":\n";continue;}
+ls.splice(pe.idx+1,0,ySpaces(pe.ind+2)+pre[pre.length-1]+":");
+cur=ls.join("\n");
+}
+return ySet(cur,path,val,literal);
+}
+function yGetSection(y,name){var lines=String(y||"").split("\n"),start=-1,end=lines.length;for(var i=0;i<lines.length;i++){var m=lines[i].match(/^([^\s#][^:]*):(.*)$/);if(m){if(start<0){if(m[1].trim()===name)start=i;}else{end=i;break;}}}if(start<0)return null;while(end-1>start&&lines[end-1].trim()===""||end-1>start&&lines[end-1].match(/^\s*#/))end--;return {start:start,end:end,block:lines.slice(start+1,end)};}
+function ySetSection(y,name,block){var lines=String(y||"").split("\n"),s=yGetSection(y,name),body=String(block||"").replace(/\s+$/,""),rep=body?[name+":",body].join("\n"):[name+": []"];if(!s){if(y&&y[y.length-1]!=="\n")y+="\n";return y+rep+"\n";}return lines.slice(0,s.start).concat(rep.split("\n"),lines.slice(s.end)).join("\n").replace(/\s+$/,"")+"\n";}
+function yParseList(s){s=String(s||"").trim();if(s[0]==="[")s=s.slice(1);if(s[s.length-1]==="]")s=s.slice(0,-1);return s.split(",").map(function(x){return x.trim().replace(/^["']|["']$/g,"");}).filter(function(x){return x;});}
+function parseSocksBlock(block){var out=[],cur=null;block.forEach(function(ln){var m=ln.match(/^\s*-\s+listen\s*:\s*(.*)$/);if(m){cur={listen:yStripVal(m[1]),user:"",pass:""};out.push(cur);return;}if(!cur)return;var m2=ln.match(/^\s*(username|password)\s*:\s*(.*)$/);if(m2){if(m2[1]==="username")cur.user=yStripVal(m2[2]);else cur.pass=yStripVal(m2[2]);}});return out;}
+function parseFwdBlock(block){var out=[],cur=null;block.forEach(function(ln){var m=ln.match(/^\s*-\s+listen\s*:\s*(.*)$/);if(m){cur={listen:yStripVal(m[1]),target:"",proto:""};out.push(cur);return;}if(!cur)return;var m2=ln.match(/^\s*(target|protocol)\s*:\s*(.*)$/);if(m2){if(m2[1]==="target")cur.target=yStripVal(m2[2]);else cur.proto=yStripVal(m2[2]);}});return out;}
+var FORM_IDS=["fRole","fLevel","fAdminEn","fListen","fToken","fTlsCert","fTlsKey","fSrvAddr","fLstnAddr","fSocks","fFwds","fGuid","fV4Addr","fV4Mac","fV6Addr","fV6Mac","fSockbuf","fHandshake","fLocalFlag","fRemoteFlag","fProto","fConn","fKcp","fMtu","fWndS","fWndR","fNodelay","fInterval","fResend","fNoCong","fWdelay","fAckNodelay","fDshard","fPshard","fSmuxbuf","fStreambuf","fKalive","fKtimeout","fBlock","fKey"];
+function setV(id,v){var e=$(id);if(e)e.value=(v==null?"":String(v));}
+function setNum(id,v){setV(id,v===""?"":(parseInt(v,10)||""));}
+function setSel(id,v,opts){var e=$(id);if(!e)return;v=String(v==null?"":v).toLowerCase();e.value=opts.indexOf(v)>=0?v:"";}
 function fillForm(y){try{
-var g=function(k){return yamlGet(y,k);};
-var r=g("role");if(r)$("fRole").value=(["client","server","relay"].indexOf(r)>=0?r:"");
-var l=g("admin_listen")||g("listen")||g("metrics_listen");if(l)$("fListen").value=l;
-var lv=(g("log_level")||g("loglevel")||g("level")||"").toLowerCase();if(["debug","info","warn","error"].indexOf(lv)>=0)$("fLevel").value=lv;
-var kc=(g("kcp")||"").toLowerCase();if(["normal","fast","fast2","fast3","manual"].indexOf(kc)>=0)$("fKcp").value=kc;
-var mtu=g("mtu");if(mtu)$("fMtu").value=parseInt(mtu,10)||"";
-var ws=g("sndwnd")||g("snd_wnd")||g("wnd_snd");if(ws)$("fWndS").value=parseInt(ws,10)||"";
-var wr=g("rcvwnd")||g("rcv_wnd")||g("wnd_rcv");if(wr)$("fWndR").value=parseInt(wr,10)||"";
-var bl=(g("block")||g("crypt")||"").toLowerCase();if(["aes","sm4","none"].indexOf(bl)>=0)$("fBlock").value=bl;
-var ky=g("key")||g("password");if(ky)$("fKey").value=ky;
+y=String(y||"");
+FORM_IDS.forEach(function(id){var e=$(id);if(e)e.value="";});
+try{$("fIface").value="";}catch(e){}
+setV("fRole",yGet(y,["role"]));
+setSel("fLevel",yGet(y,["log","level"]),["none","debug","info","warn","error","fatal"]);
+setSel("fAdminEn",yGet(y,["admin","enabled"]),["true","false"]);
+setV("fListen",yGet(y,["admin","listen"]));
+setV("fToken",yGet(y,["admin","token"]));
+setV("fTlsCert",yGet(y,["admin","tls_cert"]));
+setV("fTlsKey",yGet(y,["admin","tls_key"]));
+setV("fSrvAddr",yGet(y,["server","addr"]));
+setV("fLstnAddr",yGet(y,["listen","addr"]));
+var ss=yGetSection(y,"socks5");
+if(ss)setV("fSocks",parseSocksBlock(ss.block).map(function(e){return (e.listen+" "+e.user+" "+e.pass).trim();}).join("\n"));
+var fs=yGetSection(y,"forward");
+if(fs)setV("fFwds",parseFwdBlock(fs.block).map(function(e){return e.listen+" -> "+e.target+(e.proto?" "+e.proto:"");}).join("\n"));
+window._wantIface=yGet(y,["network","interface"]);
+try{var sel=$("fIface");if(window._wantIface)for(var i=0;i<sel.options.length;i++)if(sel.options[i].value===window._wantIface){sel.value=window._wantIface;break;}}catch(e){}
+setV("fGuid",yGet(y,["network","guid"]));
+setV("fV4Addr",yGet(y,["network","ipv4","addr"]));
+setV("fV4Mac",yGet(y,["network","ipv4","router_mac"]));
+setV("fV6Addr",yGet(y,["network","ipv6","addr"]));
+setV("fV6Mac",yGet(y,["network","ipv6","router_mac"]));
+setNum("fSockbuf",yGet(y,["network","pcap","sockbuf"]));
+setSel("fHandshake",yGet(y,["network","tcp","handshake"]),["true","false"]);
+setV("fLocalFlag",yParseList(yGet(y,["network","tcp","local_flag"])).join(","));
+setV("fRemoteFlag",yParseList(yGet(y,["network","tcp","remote_flag"])).join(","));
+setSel("fProto",yGet(y,["transport","protocol"]),["kcp"]);
+setNum("fConn",yGet(y,["transport","conn"]));
+setSel("fKcp",yGet(y,["transport","kcp","mode"]),["normal","fast","fast2","fast3","manual"]);
+setNum("fMtu",yGet(y,["transport","kcp","mtu"]));
+setNum("fWndS",yGet(y,["transport","kcp","sndwnd"]));
+setNum("fWndR",yGet(y,["transport","kcp","rcvwnd"]));
+setNum("fNodelay",yGet(y,["transport","kcp","nodelay"]));
+setNum("fInterval",yGet(y,["transport","kcp","interval"]));
+setNum("fResend",yGet(y,["transport","kcp","resend"]));
+setNum("fNoCong",yGet(y,["transport","kcp","nocongestion"]));
+setSel("fWdelay",yGet(y,["transport","kcp","wdelay"]),["true","false"]);
+setSel("fAckNodelay",yGet(y,["transport","kcp","acknodelay"]),["true","false"]);
+setNum("fDshard",yGet(y,["transport","kcp","dshard"]));
+setNum("fPshard",yGet(y,["transport","kcp","pshard"]));
+setNum("fSmuxbuf",yGet(y,["transport","kcp","smuxbuf"]));
+setNum("fStreambuf",yGet(y,["transport","kcp","streambuf"]));
+setNum("fKalive",yGet(y,["transport","kcp","smuxkalive"]));
+setNum("fKtimeout",yGet(y,["transport","kcp","smuxktimeout"]));
+setSel("fBlock",yGet(y,["transport","kcp","block"]),["aes","aes-128","aes-128-gcm","aes-192","salsa20","blowfish","twofish","cast5","3des","tea","xtea","xor","sm4","none","null"]);
+setV("fKey",yGet(y,["transport","kcp","key"]));
+updRoleVis();
+updKcpLock();
 }catch(e){}}
-function applyFormToYaml(){var y=$("cfg").value||"";if($("fRole").value)y=yamlSet(y,"role",$("fRole").value);if($("fListen").value)y=yamlSet(y,"admin_listen",$("fListen").value);if($("fLevel").value)y=yamlSet(y,"log_level",$("fLevel").value);if($("fKcp").value)y=yamlSet(y,"kcp",$("fKcp").value);if($("fMtu").value)y=yamlSet(y,"mtu",String(+$("fMtu").value));if($("fWndS").value)y=yamlSet(y,"sndwnd",String(+$("fWndS").value));if($("fWndR").value)y=yamlSet(y,"rcvwnd",String(+$("fWndR").value));if($("fBlock").value)y=yamlSet(y,"block",$("fBlock").value);if($("fKey").value)y=yamlSet(y,"key",$("fKey").value);if($("fIface").value&&$("fIface").value!=="none")y=yamlSet(y,"interface",$("fIface").value);$("cfg").value=y;return y;}
-$("bFormApply").onclick=function(){applyFormToYaml();cfgMsg("form applied to YAML (not saved yet)",true);};
-$("bFormSave").onclick=function(){applyFormToYaml();saveCfg(false);};
+function flagList(s){var parts=String(s||"").split(",").map(function(x){return x.trim().toUpperCase();}).filter(function(x){return x;});if(!parts.length)return "";return "["+parts.map(function(x){return '"'+x+'"';}).join(", ")+"]";}
+function parseSocksLines(t){var out=[],err="";String(t||"").split("\n").forEach(function(ln,n){var s=ln.trim();if(!s||s[0]==="#")return;var m=s.match(/^(\S+)(?:\s+(\S+))?(?:\s+([\s\S]+?))?\s*$/);if(!m||!m[1]){err="socks5 line "+(n+1)+": need 'listen [username] [password]'";return;}out.push({listen:m[1],user:m[2]||"",pass:m[3]||""});});return {list:out,err:err};}
+function parseFwdLines(t){var out=[],err="";String(t||"").split("\n").forEach(function(ln,n){var s=ln.trim();if(!s||s[0]==="#")return;var m=s.match(/^(.+?)\s*->\s*(\S+)(?:\s+(\S+))?\s*$/);if(!m){err="forward line "+(n+1)+": need 'listen -> target [protocol]'";return;}out.push({listen:m[1].trim(),target:m[2],proto:(m[3]||"tcp").toLowerCase()});});return {list:out,err:err};}
+function applyFormToYaml(){
+var y=$("cfg").value||"",v=function(id){var e=$(id);return e?e.value.trim():"";};
+function put(path,val,literal){y=ySet(y,path,val,literal);}
+put(["role"],v("fRole"));
+put(["log","level"],v("fLevel"));
+put(["admin","enabled"],v("fAdminEn"));
+put(["admin","listen"],v("fListen"));
+put(["admin","token"],v("fToken"));
+put(["admin","tls_cert"],v("fTlsCert"));
+put(["admin","tls_key"],v("fTlsKey"));
+put(["server","addr"],v("fSrvAddr"));
+put(["listen","addr"],v("fLstnAddr"));
+var st=v("fSocks"),sSec=yGetSection(y,"socks5");
+if(st!==""||sSec){var ps=parseSocksLines(st);if(ps.err){formNote(ps.err,true);return null;}y=ySetSection(y,"socks5",ps.list.map(function(e){var s="  - listen: "+yQuote(e.listen);if(e.user)s+="\n    username: "+yQuote(e.user);if(e.pass)s+="\n    password: "+yQuote(e.pass);return s;}).join("\n"));}
+var ft=v("fFwds"),fSec=yGetSection(y,"forward");
+if(ft!==""||fSec){var pf=parseFwdLines(ft);if(pf.err){formNote(pf.err,true);return null;}y=ySetSection(y,"forward",pf.list.map(function(e){return "  - listen: "+yQuote(e.listen)+"\n    target: "+yQuote(e.target)+"\n    protocol: "+yQuote(e.proto);}).join("\n"));}
+var ifv=v("fIface");put(["network","interface"],ifv!=="none"?ifv:"");
+put(["network","guid"],v("fGuid"));
+put(["network","ipv4","addr"],v("fV4Addr"));
+put(["network","ipv4","router_mac"],v("fV4Mac"));
+put(["network","ipv6","addr"],v("fV6Addr"));
+put(["network","ipv6","router_mac"],v("fV6Mac"));
+put(["network","pcap","sockbuf"],v("fSockbuf"));
+put(["network","tcp","handshake"],v("fHandshake"));
+var lf=flagList(v("fLocalFlag"));if(lf)put(["network","tcp","local_flag"],lf,true);
+var rf=flagList(v("fRemoteFlag"));if(rf)put(["network","tcp","remote_flag"],rf,true);
+put(["transport","protocol"],v("fProto"));
+put(["transport","conn"],v("fConn"));
+put(["transport","kcp","mode"],v("fKcp"));
+put(["transport","kcp","mtu"],v("fMtu"));
+put(["transport","kcp","sndwnd"],v("fWndS"));
+put(["transport","kcp","rcvwnd"],v("fWndR"));
+put(["transport","kcp","nodelay"],v("fNodelay"));
+put(["transport","kcp","interval"],v("fInterval"));
+put(["transport","kcp","resend"],v("fResend"));
+put(["transport","kcp","nocongestion"],v("fNoCong"));
+put(["transport","kcp","wdelay"],v("fWdelay"));
+put(["transport","kcp","acknodelay"],v("fAckNodelay"));
+put(["transport","kcp","dshard"],v("fDshard"));
+put(["transport","kcp","pshard"],v("fPshard"));
+put(["transport","kcp","smuxbuf"],v("fSmuxbuf"));
+put(["transport","kcp","streambuf"],v("fStreambuf"));
+put(["transport","kcp","smuxkalive"],v("fKalive"));
+put(["transport","kcp","smuxktimeout"],v("fKtimeout"));
+put(["transport","kcp","block"],v("fBlock"));
+put(["transport","kcp","key"],v("fKey"));
+$("cfg").value=y;
+return y;}
+function updRoleVis(){var r="";try{r=$("fRole").value;}catch(e){}var showC=!r||r==="client",showS=!r||r==="server";document.querySelectorAll(".only-client").forEach(function(e){e.style.display=showC?"":"none";});document.querySelectorAll(".only-server").forEach(function(e){e.style.display=showS?"":"none";});}
+// effective values per preset (mirrors aplConf in internal/tnet/kcp/kcp.go;
+// presets ignore the manual fields at runtime, manual uses them)
+var KCP_PRESETS={
+normal:{nodelay:"0",interval:"40",resend:"2",nocongestion:"1",wdelay:"true",acknodelay:"false"},
+fast:{nodelay:"0",interval:"30",resend:"2",nocongestion:"1",wdelay:"true",acknodelay:"false"},
+fast2:{nodelay:"1",interval:"20",resend:"2",nocongestion:"1",wdelay:"false",acknodelay:"true"},
+fast3:{nodelay:"1",interval:"10",resend:"2",nocongestion:"1",wdelay:"false",acknodelay:"true"}};
+var KCP_LOCK_IDS=["fNodelay","fInterval","fResend","fNoCong","fWdelay","fAckNodelay"];
+function updKcpLock(){var mode="";try{mode=$("fKcp").value;}catch(e){}var p=KCP_PRESETS[mode];KCP_LOCK_IDS.forEach(function(id){var e=$(id);if(e)e.disabled=!!p;});if(!p)return;setV("fNodelay",p.nodelay);setV("fInterval",p.interval);setV("fResend",p.resend);setV("fNoCong",p.nocongestion);setV("fWdelay",p.wdelay);setV("fAckNodelay",p.acknodelay);}
+$("bFormApply").onclick=function(){if(applyFormToYaml()==null)return;cfgMsg("form applied to YAML (not saved yet)",true);};
+$("bFormSave").onclick=function(){if(applyFormToYaml()==null)return;saveCfg(false);};
+try{$("fRole").onchange=updRoleVis;}catch(e){}
+try{$("fKcp").onchange=updKcpLock;}catch(e){}
 $("bGenKey").onclick=function(){try{var b=new Uint8Array(32);crypto.getRandomValues(b);var s="";for(var i=0;i<b.length;i++)s+=("0"+b[i].toString(16)).slice(-2);$("fKey").value=s;formNote("generated 32-byte hex secret");}catch(e){formNote("crypto.getRandomValues unavailable: "+e.message,true);}};
+// themed flag-combo suggestions (replaces the native datalist popup so the
+// dropdown matches the panel in both themes; filters on the comma token).
+var TCP_FLAGS=["S","SA","A","PA","FA","FPA","RA","R","F","P"];
+var TCP_FLAG_NAMES={S:"SYN",A:"ACK",P:"PSH",F:"FIN",R:"RST",U:"URG",E:"ECE",C:"CWR",N:"NS"};
+function flagExpand(c){return String(c||"").split("").map(function(ch){return TCP_FLAG_NAMES[ch]||ch;}).join("+");}
+var suggBox=null,suggInput=null,suggIdx=0,suggItems=[];
+function suggClose(){if(suggInput)try{suggInput.setAttribute("aria-expanded","false");}catch(e){}if(suggBox&&suggBox.remove)suggBox.remove();suggBox=null;suggInput=null;suggIdx=0;suggItems=[];try{document.removeEventListener("mousedown",suggOutside);}catch(e){}try{window.removeEventListener("scroll",suggClose,true);}catch(e){}try{window.removeEventListener("resize",suggClose);}catch(e){}}
+function suggOutside(e){if(suggBox&&suggInput&&!suggBox.contains(e.target)&&e.target!==suggInput)suggClose();}
+function suggTok(){if(!suggInput)return "";var v=String(suggInput.value==null?"":suggInput.value);return v.split(",").pop().trim().toUpperCase();}
+function suggOpen(input){
+suggClose();
+suggInput=input;suggIdx=0;
+suggBox=document.createElement("div");
+suggBox.className="sugg";suggBox.setAttribute("role","listbox");
+document.body.appendChild(suggBox);
+document.addEventListener("mousedown",suggOutside);
+window.addEventListener("scroll",suggClose,true);
+window.addEventListener("resize",suggClose);
+suggFilter();
+}
+function suggFilter(){
+if(!suggBox||!suggInput)return;
+var t=suggTok();
+suggItems=TCP_FLAGS.filter(function(f){return !t||f.indexOf(t)===0;});
+while(suggBox.firstChild)suggBox.removeChild(suggBox.firstChild);
+if(!suggItems.length){suggClose();return;}
+suggIdx=0;
+for(var i=0;i<suggItems.length;i++){
+(function(f,i){
+var d=document.createElement("div");
+d.className="opt"+(i===suggIdx?" on":"");
+d.setAttribute("role","option");d.setAttribute("aria-selected",i===suggIdx?"true":"false");
+var v=document.createElement("span");v.className="v mono";v.textContent=f;
+var e=document.createElement("span");e.className="d mono";e.textContent=flagExpand(f);
+d.appendChild(v);d.appendChild(e);
+d.addEventListener("mousedown",function(ev){ev.preventDefault();suggPick(i);});
+suggBox.appendChild(d);
+})(suggItems[i],i);
+}
+suggPlace();
+try{suggInput.setAttribute("aria-expanded","true");}catch(e){}
+}
+function suggPlace(){
+if(!suggBox||!suggInput||!suggInput.getBoundingClientRect)return;
+var r=suggInput.getBoundingClientRect(),w=Math.max(200,r.width);
+suggBox.style.minWidth=w+"px";suggBox.style.width=w+"px";
+suggBox.style.left=Math.max(8,Math.min(r.left,(window.innerWidth||1024)-w-8))+"px";
+suggBox.style.top=(r.bottom+4)+"px";
+var h=suggBox.offsetHeight||0;
+if(h>0&&r.bottom+4+h>(window.innerHeight||768))suggBox.style.top=Math.max(8,r.top-h-4)+"px";
+}
+function suggHi(){if(!suggBox||!suggBox.children)return;for(var i=0;i<suggBox.children.length;i++){var k=suggBox.children[i];if(k.classList&&k.classList.toggle)k.classList.toggle("on",i===suggIdx);if(k.setAttribute)k.setAttribute("aria-selected",i===suggIdx?"true":"false");if(i===suggIdx&&k.scrollIntoView)try{k.scrollIntoView({block:"nearest"});}catch(e){}}}
+function suggPick(i){
+if(!suggInput){suggClose();return;}
+var f=suggItems[i];if(!f){suggClose();return;}
+var toks=String(suggInput.value==null?"":suggInput.value).split(",").map(function(x){return x.trim();});
+toks[toks.length-1]=f;
+suggInput.value=toks.filter(function(x){return x!=="";}).join(", ");
+var input=suggInput;
+suggClose();
+try{input.focus();}catch(e){}
+try{input.dispatchEvent(new Event("input",{bubbles:true}));}catch(e){}
+}
+document.addEventListener("keydown",function(e){
+if(!suggBox||!suggInput||e.target!==suggInput)return;
+if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();suggIdx=(suggIdx+(e.key==="ArrowDown"?1:-1)+suggItems.length)%suggItems.length;suggHi();}
+else if(e.key==="Enter"){if(suggIdx>=0&&suggItems[suggIdx]){e.preventDefault();suggPick(suggIdx);}}
+else if(e.key==="Escape"){e.preventDefault();suggClose();}
+});
+["fLocalFlag","fRemoteFlag"].forEach(function(id){
+var el=$(id);if(!el||!el.addEventListener)return;
+try{el.setAttribute("role","combobox");el.setAttribute("aria-expanded","false");el.setAttribute("aria-autocomplete","list");}catch(e){}
+el.addEventListener("focus",function(){suggOpen(el);});
+el.addEventListener("input",function(){if(!suggBox)suggOpen(el);else suggFilter();});
+el.addEventListener("blur",function(){suggClose();});
+});
 // interfaces (tolerate 404): shared by form select + diag tab
 function parseIfaces(d){if(!d)return [];if(Array.isArray(d))return d;if(Array.isArray(d.interfaces))return d.interfaces;if(Array.isArray(d.ifaces))return d.ifaces;if(Array.isArray(d.data))return d.data;return [];}
 function loadIfaces(quiet){return api("api/net/interfaces",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("interfaces endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var list=parseIfaces(d);fillIfaces(list);return list;}).catch(function(e){var sel=$("fIface"),cur=sel.value;while(sel.firstChild)sel.removeChild(sel.firstChild);[["","unavailable — type manually"],["none","none"]].forEach(function(o){var op=document.createElement("option");op.value=o[0];op.textContent=o[1];sel.appendChild(op);});if(!quiet)formNote("interfaces: "+e.message+" — continuing",true);renderIfaceTable([],String((e&&e.message)||e));return [];});}
-function fillIfaces(list){var sel=$("fIface"),cur="";try{cur=sel.value;}catch(e){}while(sel.firstChild)sel.removeChild(sel.firstChild);var o0=document.createElement("option");o0.value="";o0.textContent=list.length?"select interface…":"no interfaces reported";sel.appendChild(o0);list.forEach(function(it){var nm=typeof it==="string"?it:(it.name||it.iface||it.id||JSON.stringify(it));var op=document.createElement("option");op.value=nm;op.textContent=nm;sel.appendChild(op);});renderIfaceTable(list,"");}
+function fillIfaces(list){var sel=$("fIface"),cur="";try{cur=sel.value;}catch(e){}while(sel.firstChild)sel.removeChild(sel.firstChild);var o0=document.createElement("option");o0.value="";o0.textContent=list.length?"select interface…":"no interfaces reported";sel.appendChild(o0);list.forEach(function(it){var nm=typeof it==="string"?it:(it.name||it.iface||it.id||JSON.stringify(it));var op=document.createElement("option");op.value=nm;op.textContent=nm;sel.appendChild(op);});try{if(window._wantIface)for(var i=0;i<sel.options.length;i++)if(sel.options[i].value===window._wantIface){sel.value=window._wantIface;break;}}catch(e){}renderIfaceTable(list,"");}
 function renderIfaceTable(list,errMsg){var tb=$("ifaceBody");if(!tb)return;while(tb.firstChild)tb.removeChild(tb.firstChild);$("ifaceEmpty").style.display=list.length?"none":"block";list.slice(0,100).forEach(function(it){var tr=document.createElement("tr");var nm,ad,fl;if(typeof it==="string"){nm=it;ad="";fl="";}else{nm=it.name||it.iface||"?";var a=it.addrs||it.addresses||it.addr||it.ip||"";ad=Array.isArray(a)?a.join(", "):String(a);if(Array.isArray(it.flags))fl=it.flags.join(",");else if(typeof it.is_up==="boolean")fl=(it.is_up?"up":"down")+(it.mtu?(" · mtu "+it.mtu):"");else fl=String(it.flags||it.status||(it.mtu?("mtu "+it.mtu):"")||"");}[[nm,"mono"],[ad,"mono"],[fl,"mono"]].forEach(function(p){var td=document.createElement("td");td.textContent=p[0];td.className=p[1];tr.appendChild(td);});tb.appendChild(tr);});if(errMsg)setT("diagNote",errMsg);}
 // backups (tolerate 404)
 function loadBackups(){api("api/config/backups",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("backups unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var list=Array.isArray(d)?d:(d.backups||d.files||d.items||[]);var sel=$("fBackups");while(sel.firstChild)sel.removeChild(sel.firstChild);if(!list.length){var o=document.createElement("option");o.value="";o.textContent="backups: none";sel.appendChild(o);return;}list.forEach(function(b){var nm=typeof b==="string"?b:(b.file||b.name||b.id||b.path||JSON.stringify(b));var op=document.createElement("option");op.value=nm;op.textContent=nm;sel.appendChild(op);});formNote("loaded "+list.length+" backup(s)");}).catch(function(e){var sel=$("fBackups");while(sel.firstChild)sel.removeChild(sel.firstChild);var o=document.createElement("option");o.value="";o.textContent="backups unavailable";sel.appendChild(o);formNote("backups: "+e.message+" — continuing",true);});}

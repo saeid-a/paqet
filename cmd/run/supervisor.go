@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"sort"
 	"sync"
@@ -50,6 +51,8 @@ type supervisor struct {
 	listenerMu     sync.Mutex
 	listeners      map[string]func(context.Context) error
 	listenerCancel map[string]context.CancelFunc
+	listenerToken  map[string]uint64
+	listenerSeq    uint64
 }
 
 func newSupervisor(configPath string, startFn func(ctx context.Context, cfg *conf.Conf) error) *supervisor {
@@ -58,6 +61,7 @@ func newSupervisor(configPath string, startFn func(ctx context.Context, cfg *con
 		startFn:        startFn,
 		listeners:      make(map[string]func(context.Context) error),
 		listenerCancel: make(map[string]context.CancelFunc),
+		listenerToken:  make(map[string]uint64),
 	}
 }
 
@@ -81,16 +85,25 @@ func (s *supervisor) maxAttempts() int {
 // and is still held on return; it is released while sleeping between
 // attempts so stop/status paths stay responsive. If the core context is
 // cancelled while backing off, the retry loop aborts early.
-func (s *supervisor) runStartLocked(ctx context.Context, cfg *conf.Conf) error {
+//
+// Each attempt runs with its own child context derived from ctx; the child
+// is cancelled immediately when that attempt fails (including before retry
+// backoff) so partially-started components tied to the attempt are torn
+// down. On success the attempt's context and cancel func are returned so
+// callers can retain them as coreCtx/coreCancel. On overall failure the
+// caller retains responsibility for cleaning up the parent ctx.
+func (s *supervisor) runStartLocked(ctx context.Context, cfg *conf.Conf) (context.Context, context.CancelFunc, error) {
 	attempts := s.maxAttempts()
 	var err error
 	for i := 0; i < attempts; i++ {
-		err = s.startFn(ctx, cfg)
+		attemptCtx, attemptCancel := context.WithCancel(ctx)
+		err = s.startFn(attemptCtx, cfg)
 		if err == nil {
-			return nil
+			return attemptCtx, attemptCancel, nil
 		}
+		attemptCancel()
 		if ctx.Err() != nil {
-			return err
+			return nil, nil, err
 		}
 		flog.Errorf("core start failed (attempt %d/%d): %v", i+1, attempts, err)
 		if i+1 >= attempts {
@@ -102,17 +115,20 @@ func (s *supervisor) runStartLocked(ctx context.Context, cfg *conf.Conf) error {
 		case <-ctx.Done():
 			timer.Stop()
 			s.mu.Lock()
-			return err
+			return nil, nil, err
 		case <-timer.C:
 		}
 		s.mu.Lock()
+		if ctx.Err() != nil {
+			return nil, nil, err
+		}
 		// If another request started the core while we were backing off,
 		// do not clobber its state.
 		if s.running.Load() {
-			return fmt.Errorf("core started by another request, aborting retry")
+			return nil, nil, fmt.Errorf("core started by another request, aborting retry")
 		}
 	}
-	return err
+	return nil, nil, err
 }
 
 func (s *supervisor) start() error {
@@ -135,18 +151,30 @@ func (s *supervisor) start() error {
 	s.startGen++
 	gen := s.startGen
 	s.startCancel = cancel
-	if err := s.runStartLocked(ctx, cfg); err != nil {
+	attemptCtx, attemptCancel, runErr := s.runStartLocked(ctx, cfg)
+	if runErr != nil {
 		if s.startGen == gen {
 			s.startCancel = nil
 		}
 		cancel()
-		return err
+		return runErr
+	}
+	if s.startGen != gen || ctx.Err() != nil || attemptCtx.Err() != nil {
+		attemptCancel()
+		if s.startGen == gen {
+			s.startCancel = nil
+			cancel()
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("core start aborted: %w", ctx.Err())
+		}
+		return fmt.Errorf("core start superseded, aborting commit")
 	}
 	if s.startGen == gen {
 		s.startCancel = nil
 	}
-	s.coreCtx = ctx
-	s.coreCancel = cancel
+	s.coreCtx = attemptCtx
+	s.coreCancel = func() { attemptCancel(); cancel() }
 	s.running.Store(true)
 	metrics.SetRunning(true)
 	flog.Infof("core started via control panel")
@@ -184,6 +212,11 @@ func (s *supervisor) restart() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	cfg, err := conf.LoadFromFile(s.configPath)
+	if err != nil {
+		return fmt.Errorf("cannot restart (bad config): %v", err)
+	}
+
 	if s.startCancel != nil {
 		// Cancel an in-flight start; the restart below supersedes it.
 		s.startCancel()
@@ -198,10 +231,6 @@ func (s *supervisor) restart() error {
 	s.running.Store(false)
 	metrics.SetRunning(false)
 
-	cfg, err := conf.LoadFromFile(s.configPath)
-	if err != nil {
-		return fmt.Errorf("cannot restart (bad config): %v", err)
-	}
 	flog.SetLevel(cfg.Log.Level)
 	metrics.SetRole(cfg.Role)
 
@@ -209,18 +238,30 @@ func (s *supervisor) restart() error {
 	s.startGen++
 	gen := s.startGen
 	s.startCancel = cancel
-	if err := s.runStartLocked(ctx, cfg); err != nil {
+	attemptCtx, attemptCancel, runErr := s.runStartLocked(ctx, cfg)
+	if runErr != nil {
 		if s.startGen == gen {
 			s.startCancel = nil
 		}
 		cancel()
-		return err
+		return runErr
+	}
+	if s.startGen != gen || ctx.Err() != nil || attemptCtx.Err() != nil {
+		attemptCancel()
+		if s.startGen == gen {
+			s.startCancel = nil
+			cancel()
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("core restart aborted: %w", ctx.Err())
+		}
+		return fmt.Errorf("core restart superseded, aborting commit")
 	}
 	if s.startGen == gen {
 		s.startCancel = nil
 	}
-	s.coreCtx = ctx
-	s.coreCancel = cancel
+	s.coreCtx = attemptCtx
+	s.coreCancel = func() { attemptCancel(); cancel() }
 	s.running.Store(true)
 	metrics.SetRunning(true)
 	flog.Infof("core restarted via control panel")
@@ -249,6 +290,7 @@ func (s *supervisor) UnregisterListener(name string) {
 	cancel, running := s.listenerCancel[name]
 	if running {
 		delete(s.listenerCancel, name)
+		delete(s.listenerToken, name)
 	}
 	delete(s.listeners, name)
 	s.listenerMu.Unlock()
@@ -290,9 +332,12 @@ func (s *supervisor) StartListener(name string) error {
 		return fmt.Errorf("listener %q already running", name)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	s.listenerSeq++
+	token := s.listenerSeq
 	s.listenerCancel[name] = cancel
+	s.listenerToken[name] = token
 	s.listenerMu.Unlock()
-	go s.runListener(name, ctx, fn)
+	go s.runListener(name, ctx, fn, token)
 	return nil
 }
 
@@ -305,6 +350,7 @@ func (s *supervisor) StopListener(name string) error {
 		return fmt.Errorf("listener %q not running", name)
 	}
 	delete(s.listenerCancel, name)
+	delete(s.listenerToken, name)
 	s.listenerMu.Unlock()
 	cancel()
 	return nil
@@ -312,25 +358,25 @@ func (s *supervisor) StopListener(name string) error {
 
 // runListener executes a listener func with backoff when auto-restart is on.
 // An intentional stop (context cancelled) is not treated as a failure.
-func (s *supervisor) runListener(name string, ctx context.Context, fn func(context.Context) error) {
+func (s *supervisor) runListener(name string, ctx context.Context, fn func(context.Context) error, token uint64) {
 	attempts := s.maxAttempts()
 	for i := 0; i < attempts; i++ {
 		err := fn(ctx)
 		if err == nil || ctx.Err() != nil {
-			s.finishListener(name)
+			s.finishListener(name, token)
 			return
 		}
 		flog.Errorf("listener %q failed (attempt %d/%d): %v", name, i+1, attempts, err)
 		if i+1 >= attempts {
 			flog.Errorf("listener %q gave up after %d attempts", name, attempts)
-			s.finishListener(name)
+			s.finishListener(name, token)
 			return
 		}
 		timer := time.NewTimer(supervisorRetryDelay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			s.finishListener(name)
+			s.finishListener(name, token)
 			return
 		case <-timer.C:
 		}
@@ -339,10 +385,16 @@ func (s *supervisor) runListener(name string, ctx context.Context, fn func(conte
 
 // finishListener clears the running marker for a listener that exited.
 // Idempotent: StopListener already removes the marker on the stop path.
-func (s *supervisor) finishListener(name string) {
+// The token guards against an older run clearing a newer run's marker:
+// only delete when the stored token matches the exiting run.
+func (s *supervisor) finishListener(name string, token uint64) {
 	s.listenerMu.Lock()
 	defer s.listenerMu.Unlock()
+	if s.listenerToken[name] != token {
+		return
+	}
 	delete(s.listenerCancel, name)
+	delete(s.listenerToken, name)
 }
 
 // Drain closes all supervisor-registered listeners and waits for active
@@ -361,6 +413,7 @@ func (s *supervisor) Drain(timeoutSec int) error {
 	for name := range s.listenerCancel {
 		s.listenerCancel[name]()
 		delete(s.listenerCancel, name)
+		delete(s.listenerToken, name)
 	}
 	s.listenerMu.Unlock()
 	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
@@ -412,7 +465,7 @@ func (s *supervisor) boot(parentCtx context.Context, initial *conf.Conf) {
 	s.startGen++
 	gen := s.startGen
 	s.startCancel = cancel
-	err := s.runStartLocked(ctx, initial)
+	attemptCtx, attemptCancel, err := s.runStartLocked(ctx, initial)
 	if s.startGen == gen {
 		s.startCancel = nil
 	}
@@ -420,12 +473,22 @@ func (s *supervisor) boot(parentCtx context.Context, initial *conf.Conf) {
 		s.mu.Unlock()
 		cancel()
 		flog.Errorf("core failed to start: %v", err)
+		if !adminCfg.Enabled {
+			os.Exit(1)
+		}
 	} else {
-		s.coreCtx = ctx
-		s.coreCancel = cancel
-		s.running.Store(true)
-		metrics.SetRunning(true)
-		s.mu.Unlock()
+		if s.startGen != gen || ctx.Err() != nil || attemptCtx.Err() != nil {
+			attemptCancel()
+			cancel()
+			s.mu.Unlock()
+			flog.Errorf("core start aborted before commit")
+		} else {
+			s.coreCtx = attemptCtx
+			s.coreCancel = func() { attemptCancel(); cancel() }
+			s.running.Store(true)
+			metrics.SetRunning(true)
+			s.mu.Unlock()
+		}
 	}
 
 	<-parentCtx.Done()

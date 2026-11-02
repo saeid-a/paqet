@@ -44,6 +44,7 @@ PCAP_TARBALL  := $(PCAP_ROOT)/libpcap-$(LIBPCAP_VER).tar.gz
 PCAP_CFG      := --disable-shared --disable-dbus --disable-bluetooth --disable-netmap --disable-rdma
 
 .PHONY: all build build-all install clean test vet pcap-deps version
+.PHONY: $(BUILD_DIR)/paqet-darwin-arm64 $(BUILD_DIR)/paqet-linux-arm64 $(BUILD_DIR)/paqet-linux-amd64
 
 all: build
 
@@ -60,6 +61,7 @@ build:
 # Install to GOBIN. macOS invalidates the old code signature when a binary
 # is overwritten in place, so strip xattrs and re-sign adhoc first.
 install: build
+	@mkdir -p $(GOBIN)
 	cp $(BUILD_DIR)/paqet $(GOBIN)/paqet
 ifeq ($(shell go env GOOS),darwin)
 	xattr -c $(GOBIN)/paqet
@@ -74,6 +76,7 @@ build-all: $(BUILD_DIR)/paqet-darwin-arm64 $(BUILD_DIR)/paqet-linux-arm64 $(BUIL
 
 $(BUILD_DIR)/paqet-darwin-arm64:
 	@mkdir -p $(BUILD_DIR)
+	@if [ "$$(go env GOOS)" != "darwin" ]; then echo "error: paqet-darwin-arm64 CGO build requires a darwin host (got $$(go env GOOS)); refusing to use an incompatible host compiler" >&2; exit 1; fi
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 \
 	go build -trimpath -gcflags "$(GCFLAGS)" -ldflags "$(LDFLAGS)" \
 		-o $@ $(CMD)
@@ -91,10 +94,7 @@ define pcap_static
 		CC="zig cc -target $2" ./configure --host=$1 $(PCAP_CFG) >/dev/null && \
 		make -j8 >/dev/null && \
 		rm -f libpcap.a && \
-		zig ar rc libpcap.a pcap-linux.o fad-getad.o pcap-usb-linux.o pcap-netfilter-linux.o \
-			pcap.o gencode.o optimize.o nametoaddr.o etherent.o fmtutils.o pcap-util.o \
-			savefile.o sf-pcap.o sf-pcapng.o pcap-common.o bpf_image.o bpf_filter.o \
-			bpf_dump.o scanner.o grammar.o strlcat.o strlcpy.o && \
+		zig ar rc libpcap.a *.o && \
 		zig ranlib libpcap.a && \
 		echo "libpcap static [$1] ready"; \
 	fi

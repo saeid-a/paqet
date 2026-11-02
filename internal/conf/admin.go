@@ -21,8 +21,13 @@ func (a *Admin) validate() []error {
 		return nil
 	}
 	var errors []error
-	if _, err := validateTCPAddr(a.Listen_, true); err != nil {
+	addr, err := validateTCPAddr(a.Listen_, true)
+	if err != nil {
 		errors = append(errors, err)
+	} else if addr.IP == nil || !addr.IP.IsLoopback() {
+		if a.Token == "" {
+			errors = append(errors, fmt.Errorf("admin token is required when listening on a non-loopback address"))
+		}
 	}
 	if a.Token != "" && len(a.Token) < 16 {
 		errors = append(errors, fmt.Errorf("admin token must be at least 16 characters"))

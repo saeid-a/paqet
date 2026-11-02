@@ -19,7 +19,7 @@ paqet operates on raw packets instead. It crafts TCP packets directly and uses p
 ### Prerequisites
 
 - `libpcap` development libraries must be installed on both the client and server machines.
-  - **Linux:** No prerequisites - binaries are statically linked.
+  - **Linux:** No libpcap prerequisites - libpcap is statically linked, but the binary still requires the host glibc runtime matching the build toolchain.
   - **macOS:** Comes pre-installed with Xcode Command Line Tools. Install with `xcode-select --install`
   - **Windows:** Install Npcap. Download from [npcap.com](https://npcap.com/).
 
@@ -170,10 +170,11 @@ Scope the suppression to the server address so unrelated traffic keeps
 normal reset behavior:
 
 ```bash
-# Replace <SERVER_IP> with the paqet server address (e.g., 128.140.2.9).
+# Replace <SERVER_IP> with the paqet server address (e.g., 128.140.2.9)
+# and <PORT> with the paqet server port (e.g., 9999).
 # Run as root on the client (Linux):
-sudo iptables -t raw -A PREROUTING -s <SERVER_IP> -p tcp -j NOTRACK
-sudo iptables -t mangle -A OUTPUT -d <SERVER_IP> -p tcp --tcp-flags RST RST -j DROP
+sudo iptables -t raw -A PREROUTING -s <SERVER_IP> -p tcp --sport <PORT> -j NOTRACK
+sudo iptables -t mangle -A OUTPUT -d <SERVER_IP> -p tcp --dport <PORT> --tcp-flags RST RST -j DROP
 ```
 
 No application-code change is made for this: suppressing own-kernel

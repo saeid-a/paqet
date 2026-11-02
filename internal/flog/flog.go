@@ -70,13 +70,13 @@ func Logs(tail int) []LogEntry {
 }
 
 func pushLog(level, msg string) {
+	logMu.Lock()
 	e := LogEntry{
 		ID:      logSeq.Add(1),
 		Time:    time.Now().Format("2006-01-02 15:04:05.000"),
 		Level:   level,
 		Message: msg,
 	}
-	logMu.Lock()
 	logBuf = append(logBuf, e)
 	if len(logBuf) > maxLogEntries {
 		logBuf = append([]LogEntry(nil), logBuf[len(logBuf)-maxLogEntries:]...)

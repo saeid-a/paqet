@@ -119,7 +119,8 @@ func firewallRulesPresent(combined string, port int) (hasNotrackDport, hasNotrac
 	dport := fmt.Sprintf("--dport %d", port)
 	sport := fmt.Sprintf("--sport %d", port)
 	for _, line := range strings.Split(combined, "\n") {
-		if strings.Contains(line, "NOTRACK") {
+		upper := strings.ToUpper(line)
+		if strings.Contains(upper, "NOTRACK") {
 			if hasPortToken(line, dport) {
 				hasNotrackDport = true
 			}
@@ -127,7 +128,7 @@ func firewallRulesPresent(combined string, port int) (hasNotrackDport, hasNotrac
 				hasNotrackSport = true
 			}
 		}
-		if strings.Contains(line, "DROP") && strings.Contains(line, "RST") && hasPortToken(line, sport) {
+		if strings.Contains(upper, "DROP") && strings.Contains(upper, "RST") && hasPortToken(line, sport) {
 			hasRSTDrop = true
 		}
 	}

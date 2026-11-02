@@ -2,8 +2,10 @@ package run
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -14,7 +16,11 @@ import (
 // in-flight start instead of returning "already stopped" while the core
 // still comes up afterwards.
 func TestStopCancelsStartBackoff(t *testing.T) {
-	cfgYAML := `role: "client"
+	iface := "lo0"
+	if runtime.GOOS == "linux" {
+		iface = "lo"
+	}
+	cfgYAML := fmt.Sprintf(`role: "client"
 log:
   level: "info"
 admin:
@@ -22,7 +28,7 @@ admin:
 socks5:
   - listen: "127.0.0.1:18081"
 network:
-  interface: "lo0"
+  interface: "%s"
   ipv4:
     addr: "127.0.0.1:0"
     router_mac: "aa:bb:cc:dd:ee:ff"
@@ -34,7 +40,7 @@ transport:
   kcp:
     mode: "fast"
     key: "test-secret-key-123"
-`
+`, iface)
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(cfgYAML), 0600); err != nil {
 		t.Fatal(err)

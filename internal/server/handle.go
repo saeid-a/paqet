@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"io"
 
 	"paqet/internal/flog"
 	"paqet/internal/metrics"
@@ -13,7 +15,7 @@ func (s *Server) handleConn(ctx context.Context, conn tnet.Conn) {
 	for {
 		strm, err := conn.AcceptStrm()
 		if err != nil {
-			if ctx.Err() == nil {
+			if ctx.Err() == nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) {
 				flog.Errorf("failed to accept stream on %s: %v", conn.RemoteAddr(), err)
 				metrics.IncFailure()
 			}
