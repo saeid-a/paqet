@@ -1,0 +1,34 @@
+package metrics
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestDiagDialRejectsBadPort(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/diag/dial", strings.NewReader(`{"host":"x","port":0}`))
+	rec := httptest.NewRecorder()
+	diagDialHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", rec.Code)
+	}
+}
+
+func TestDiagDialConcurrencyCap(t *testing.T) {
+	for i := 0; i < 4; i++ {
+		dialSem <- struct{}{}
+	}
+	defer func() {
+		for i := 0; i < 4; i++ {
+			<-dialSem
+		}
+	}()
+	req := httptest.NewRequest(http.MethodPost, "/api/diag/dial", strings.NewReader(`{"host":"x","port":80}`))
+	rec := httptest.NewRecorder()
+	diagDialHandler(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("want 429, got %d", rec.Code)
+	}
+}
