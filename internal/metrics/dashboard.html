@@ -176,21 +176,21 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="card"><div class="k">Active conns</div><div class="v num" id="aConn">—</div><div class="s">connections</div></div>
 <div class="card"><div class="k">Active streams</div><div class="v num" id="aStr">—</div><div class="s">streams</div></div>
 <div class="card"><div class="k">Runtime</div><div class="v num" id="rtGo">—</div><div class="s num" id="rtMem">—</div><details id="rtDetail"><summary class="mono">runtime detail</summary><div class="mono" id="rtDetailBody">loading…</div></details></div>
-<div class="card"><div class="k">KCP</div><div class="v num" id="kcpRtt">—</div><div class="s num" id="kcpSub">—</div></div>
+<div class="card"><div class="k">KCP</div><div class="v num" id="kcpRtt">—</div><div class="s num" id="kcpSub">—</div><div class="s num" id="kcpLoss">—</div></div>
 <div class="card" id="postureCard"><div class="k">Security posture</div><div class="v num" id="postureExp">—</div><div class="s mono" id="postureSub">—</div></div>
 </div>
 <div class="panel"><h2>Throughput (last 120s)</h2><canvas id="spark" width="600" height="140"></canvas>
-<div class="legend"><span><span class="sw" style="background:var(--grn)"></span>in <span class="mono" id="lgIn"></span></span><span><span class="sw" style="background:var(--blu)"></span>out <span class="mono" id="lgOut"></span></span></div>
+<div class="legend"><span><span class="sw" style="background:var(--grn)"></span>in <span class="mono" id="lgIn"></span></span><span><span class="sw" style="background:var(--blu)"></span>out <span class="mono" id="lgOut"></span></span><span><span class="sw" style="background:var(--amber)"></span>failure spike</span></div>
 <div class="row"><label class="chk">spike +<input type="number" id="alertThr" value="10" min="1" max="1000" style="width:64px"> /min</label><label class="chk"><input type="checkbox" id="alertMute"> mute</label></div>
 </div>
-<div class="panel"><h2>Success / failure</h2><div class="wrap"><table id="sf"><tr><th>Channel</th><th class="n">Success</th><th class="n">Failure</th></tr></table></div></div>
+<div class="panel"><h2>Success / failure</h2><div class="wrap"><table id="sf"><tr><th>Channel</th><th class="n">Success</th><th class="n">Failure</th><th class="n">Succ/s</th><th class="n">Fail/s</th></tr></table></div></div>
 <p class="note">Click a connection row for JSON detail.</p>
 </section>
 
 <section id="t-conns" class="hide">
 <div class="panel"><h2>Connections</h2>
 <div class="row"><input type="text" id="q" placeholder="filter by addr, id, status…"><button id="bConnCsv">Export CSV</button><label class="chk"><input type="checkbox" id="connGone" checked> recently closed</label><span class="note" id="connTop"></span></div>
-<div class="wrap"><table id="connTable"><thead><tr><th data-sk="id">id</th><th data-sk="remote">remote</th><th data-sk="local">local</th><th data-sk="status">status</th><th class="n" data-sk="uptime">uptime</th><th class="n" data-sk="in">in</th><th class="n" data-sk="out">out</th><th class="n" data-sk="rin">in/s</th><th class="n" data-sk="rout">out/s</th><th class="n" data-sk="tot">tot/s</th><th class="n" data-sk="streams">streams</th></tr></thead><tbody id="connBody"></tbody></table>
+<div class="wrap"><table id="connTable"><thead><tr><th data-sk="id">id</th><th data-sk="remote">remote</th><th data-sk="local">local</th><th data-sk="status">status</th><th class="n" data-sk="uptime">uptime</th><th class="n" data-sk="idle">idle</th><th class="n" data-sk="in">in</th><th class="n" data-sk="out">out</th><th class="n" data-sk="rin">in/s</th><th class="n" data-sk="rout">out/s</th><th class="n" data-sk="tot">tot/s</th><th class="n" data-sk="rtt">rtt</th><th class="n" data-sk="streams">streams</th></tr></thead><tbody id="connBody"></tbody></table>
 <div class="empty" id="connEmpty">no connections</div></div></div>
 </section>
 
@@ -389,15 +389,19 @@ document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.t
 function openModal(c){setT("modalBody",JSON.stringify(c,null,2));$("modal").classList.remove("hide");}
 $("modalX").onclick=function(){$("modal").classList.add("hide");};
 $("modal").addEventListener("click",function(e){if(e.target===this)this.classList.add("hide");});
-function sfRow(name,ok,fail){var tr=document.createElement("tr"),a=document.createElement("td"),b=document.createElement("td"),c=document.createElement("td");a.textContent=name;b.textContent=fmtInt(ok);b.className="n num ok-t";c.textContent=fmtInt(fail);c.className="n num bad-t";tr.appendChild(a);tr.appendChild(b);tr.appendChild(c);return tr;}
-var sfBody=null;
-function renderSF(d){if(!sfBody){sfBody=document.createElement("tbody");$("sf").appendChild(sfBody);}while(sfBody.firstChild)sfBody.removeChild(sfBody.firstChild);var rows=[["total",d.success_total,d.failure_total],["tcp",d.success_tcp,d.failure_tcp],["udp",d.success_udp,d.failure_udp],["socks",d.success_socks,d.failure_socks],["fwd tcp",d.success_forward_tcp,d.failure_forward_tcp],["fwd udp",d.success_forward_udp,d.failure_forward_udp]];for(var i=0;i<rows.length;i++)sfBody.appendChild(sfRow(rows[i][0],rows[i][1],rows[i][2]));}
+function fmtCountRate(n){n=+n||0;return n.toFixed(2)+" /s";}
+function sfRow(name,ok,fail,okr,failr){var tr=document.createElement("tr"),a=document.createElement("td"),b=document.createElement("td"),c=document.createElement("td"),d=document.createElement("td"),e=document.createElement("td");a.textContent=name;b.textContent=fmtInt(ok);b.className="n num ok-t";c.textContent=fmtInt(fail);c.className="n num bad-t";d.textContent=fmtCountRate(okr);d.className="n num";e.textContent=fmtCountRate(failr);e.className="n num";tr.appendChild(a);tr.appendChild(b);tr.appendChild(c);tr.appendChild(d);tr.appendChild(e);return tr;}
+var sfBody=null,sfWins={};
+function sfRate(key,v,now){var w=sfWins[key]||(sfWins[key]=[]);return winRate(w,v,now,0);}
+function renderSF(d,now){now=+now||Date.now();if(!sfBody){sfBody=document.createElement("tbody");$("sf").appendChild(sfBody);}while(sfBody.firstChild)sfBody.removeChild(sfBody.firstChild);var rows=[["total","st",d.success_total,d.failure_total],["tcp","tcp",d.success_tcp,d.failure_tcp],["udp","udp",d.success_udp,d.failure_udp],["socks","socks",d.success_socks,d.failure_socks],["fwd tcp","ftcp",d.success_forward_tcp,d.failure_forward_tcp],["fwd udp","fudp",d.success_forward_udp,d.failure_forward_udp]];for(var i=0;i<rows.length;i++){var r=rows[i];sfBody.appendChild(sfRow(r[0],r[2],r[3],sfRate(r[1]+"_ok",r[2],now),sfRate(r[1]+"_fail",r[3],now)));}}
 // per-connection live rates: one sliding window per conn id, same 10s
 // winRate helper as the cards. Windows for vanished ids are pruned.
 var connWins={},connSort={key:"tot",dir:-1};
 function connId(c){return String(c.id!=null&&c.id!==""?c.id:(c.remote_addr||"?"));}
+function connRtt(c){var v=(c.rtt_ms!=null?c.rtt_ms:(c.RttMs!=null?c.RttMs:(c.rtt!=null?c.rtt:null)));if(v==null||v===""||isNaN(+v))return null;return +v;}
+function connIdleSec(c,now){var s=c.last_seen||c.lastSeen||c.LastSeen;if(!s)return null;var t=Date.parse(s);if(isNaN(t))return null;var d=((+now||Date.now())-t)/1000;if(!(d>=0))return null;return d;}
 function connRates(now){var seen={};(connCache||[]).forEach(function(c){var k=connId(c);seen[k]=1;var w=connWins[k]||(connWins[k]={in:[],out:[]});c._rin=winRate(w.in,c.bytes_in,now,0);c._rout=winRate(w.out,c.bytes_out,now,0);c._rate=(c._rin||0)+(c._rout||0);});Object.keys(connWins).forEach(function(k){if(!seen[k])delete connWins[k];});}
-function connVal(c,k){switch(k){case "id":return String(c.id==null?"":c.id);case "remote":return String(c.remote_addr||"").toLowerCase();case "local":return String(c.local_addr||"").toLowerCase();case "status":return String(c.status||"").toLowerCase();case "uptime":return +c.uptime_seconds||0;case "in":return +c.bytes_in||0;case "out":return +c.bytes_out||0;case "rin":return c._rin||0;case "rout":return c._rout||0;case "tot":return c._rate||0;case "streams":return +c.active_streams||0;}return 0;}
+function connVal(c,k){switch(k){case "id":return String(c.id==null?"":c.id);case "remote":return String(c.remote_addr||"").toLowerCase();case "local":return String(c.local_addr||"").toLowerCase();case "status":return String(c.status||"").toLowerCase();case "uptime":return +c.uptime_seconds||0;case "idle":var _id=connIdleSec(c,Date.now());return _id==null?-1:_id;case "in":return +c.bytes_in||0;case "out":return +c.bytes_out||0;case "rin":return c._rin||0;case "rout":return c._rout||0;case "tot":return c._rate||0;case "rtt":var _r=connRtt(c);return _r==null?-1:_r;case "streams":return +c.active_streams||0;}return 0;}
 function renderConns(list){list=list||[];var now=Date.now();trackGone(list,now);connCache=list;connRates(now);applyFilter();}
 // lifecycle: vanished ids are kept as dimmed tombstones (status "closed")
 // so a disconnect stays visible instead of silently dropping off the table.
@@ -426,8 +430,8 @@ for(var i=0;i<n;i++){(function(c){var tr=document.createElement("tr");tr.classNa
 function cell(t,cls){var td=document.createElement("td");td.textContent=t;td.className=cls;tr.appendChild(td);}
 cell(c.id,"n num");cell(""+c.remote_addr,"mono");cell(""+c.local_addr,"mono");
 var st=document.createElement("td");st.textContent=c.closedAt?"closed":""+c.status;st.className=c.closedAt||c.status!=="active"?"st-closed":"st-active";tr.appendChild(st);
-cell(fmtDur(c.uptime_seconds),"n num");cell(fmtBytes(c.bytes_in),"n num");cell(fmtBytes(c.bytes_out),"n num");
-cell(fmtRate(c._rin||0),"n num");cell(fmtRate(c._rout||0),"n num");cell(fmtRate(c._rate||0),"n num");cell(""+c.active_streams,"n num");
+cell(fmtDur(c.uptime_seconds),"n num");var _idle=connIdleSec(c,Date.now());cell(_idle==null?"—":fmtDur(_idle),"n num");cell(fmtBytes(c.bytes_in),"n num");cell(fmtBytes(c.bytes_out),"n num");
+cell(fmtRate(c._rin||0),"n num");cell(fmtRate(c._rout||0),"n num");cell(fmtRate(c._rate||0),"n num");var _rtt=connRtt(c);cell(_rtt==null?"—":fmtMs(_rtt),"n num");cell(""+c.active_streams,"n num");
 if(c.closedAt)tr.title="closed "+fmtDur((Date.now()-c.closedAt)/1000)+" ago"+(c.started_at?" · started "+c.started_at:"")+(c.last_seen?" · last seen "+c.last_seen:"");
 else if(c.started_at)tr.title="started "+c.started_at+" · last seen "+c.last_seen+(c.closed_at?" · closed "+c.closed_at:"");
 tr.onclick=function(){openModal(c);};tb.appendChild(tr);})(list[i]);}
@@ -466,10 +470,10 @@ var csv="target,bytes_in,bytes_out,success,fail\n";tgtRows.forEach(function(r){c
 var b=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="paqet-targets.csv";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);
 };
 $("bConnCsv").onclick=function(){
-var csv="id,remote,local,status,uptime,bytes_in,bytes_out,rate\n";(connCache||[]).forEach(function(c){csv+=csvQ(c.id)+","+csvQ(c.remote_addr)+","+csvQ(c.local_addr)+","+csvQ(c.status)+","+(+c.uptime_seconds||0)+","+(+c.bytes_in||0)+","+(+c.bytes_out||0)+","+(c._rate||0)+"\n";});
+var _now=Date.now();var csv="id,remote,local,status,uptime,idle,rtt_ms,bytes_in,bytes_out,rate\n";(connCache||[]).forEach(function(c){var _r=connRtt(c),_i=connIdleSec(c,_now);csv+=csvQ(c.id)+","+csvQ(c.remote_addr)+","+csvQ(c.local_addr)+","+csvQ(c.status)+","+(+c.uptime_seconds||0)+","+(_i==null?"":Math.round(_i))+","+(_r==null?"":_r)+","+(+c.bytes_in||0)+","+(+c.bytes_out||0)+","+(c._rate||0)+"\n";});
 var b=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="paqet-conns.csv";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);
 };
-function draw(){var cv=$("spark"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;ctx.clearRect(0,0,W,H);ctx.strokeStyle="#1c2438";ctx.lineWidth=1;for(var g=1;g<4;g++){var y=H*g/4;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}function line(a,color){if(!a.length)return;var mx=0,i;for(i=0;i<a.length;i++)if(a[i]>mx)mx=a[i];if(mx<=0)mx=1;ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.beginPath();for(i=0;i<a.length;i++){var x=a.length===1?W:W*i/(MAX-1),yy=H-4-(a[i]/mx)*(H-10);if(i===0)ctx.moveTo(x,yy);else ctx.lineTo(x,yy);}ctx.stroke();}line(histIn,"#34d399");line(histOut,"#60a5fa");}
+function draw(){var cv=$("spark"),ctx=cv.getContext("2d"),W=cv.width,H=cv.height;ctx.clearRect(0,0,W,H);ctx.strokeStyle="#1c2438";ctx.lineWidth=1;for(var g=1;g<4;g++){var y=H*g/4;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}function line(a,color){if(!a.length)return;var mx=0,i;for(i=0;i<a.length;i++)if(a[i]>mx)mx=a[i];if(mx<=0)mx=1;ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.beginPath();for(i=0;i<a.length;i++){var x=a.length===1?W:W*i/(MAX-1),yy=H-4-(a[i]/mx)*(H-10);if(i===0)ctx.moveTo(x,yy);else ctx.lineTo(x,yy);}ctx.stroke();}line(histIn,"#34d399");line(histOut,"#60a5fa");try{var now=Date.now();spikeMarks=spikeMarks.filter(function(t){return now-t<=120000;});ctx.strokeStyle="#fbbf24";ctx.lineWidth=1.5;for(var s=0;s<spikeMarks.length;s++){var age=now-spikeMarks[s],x=W-(age/120000)*W;if(x<0||x>W)continue;ctx.beginPath();ctx.moveTo(x,4);ctx.lineTo(x,H-4);ctx.stroke();}}catch(e){}}
 function fitCanvas(){var cv=$("spark"),r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1;cv.width=Math.max(280,r.width*d);cv.height=140*d;draw();}
 window.addEventListener("resize",fitCanvas);
 document.addEventListener("visibilitychange",function(){if(!document.hidden){poll();pollLogs();}});
@@ -480,7 +484,7 @@ var lastCfg="";
 // toasts: failure-spike + daemon disconnect/reconnect while the tab is open.
 // Throttled (one spike toast per 2 min) and capped at 4; the header
 // notice remains the persistent indicator, toasts are the nudge.
-var wasOk=null,failHist=[],lastSpike=0;
+var wasOk=null,failHist=[],lastSpike=0,spikeMarks=[];
 function toast(msg,kind){
 var box=$("toasts");if(!box)return;
 while(box.children.length>=4)box.removeChild(box.firstChild);
@@ -526,7 +530,7 @@ var base=failHist[0];
 for(var i=failHist.length-1;i>=0;i--){if(now-failHist[i].t>=45000){base=failHist[i];break;}}
 if(now-base.t<20000)return;
 var delta=f-base.f;
-if(delta>=cfg.thr&&now-lastSpike>120000){lastSpike=now;toast("failure spike: +"+fmtInt(delta)+" failures in ~1 min","warn");}
+if(delta>=cfg.thr&&now-lastSpike>120000){lastSpike=now;spikeMarks.push(now);toast("failure spike: +"+fmtInt(delta)+" failures in ~1 min","warn");}
 }
 function tick(d){
 lastStatus=d;
@@ -553,10 +557,12 @@ var rtt=pick(k,"rtt","rtt_ms","srtt","smooth_rtt",0)||pick(d,"kcp_rtt","rtt_ms",
 setT("kcpRtt",(rtt==null||+rtt<=0)?"—":fmtMs(rtt));
 var rto=pick(k,"rto","rto_ms",0),cwnd=pick(k,"cwnd","snd_wnd","wnd",0);
 setT("kcpSub","rto "+((rto==null||+rto<=0)?"—":fmtMs(rto))+" · cwnd "+((cwnd==null||+cwnd<=0)?"—":fmtInt(cwnd)));
+var retx=pick(k,"retransmits","retransmit","retx",null),fec=pick(k,"fec_shards","fec","fecShards",null);
+setT("kcpLoss","retx "+(retx==null||retx===""||isNaN(+retx)?"—":fmtInt(retx))+" · fec "+(fec==null||fec===""||isNaN(+fec)||+fec<=0?"—":fmtInt(fec)));
 $("bStart").disabled=!!d.running;$("bStop").disabled=!d.running;$("bRestart").disabled=false;$("bDrain").disabled=!d.running;
 histIn.push(rIn);histOut.push(rOut);
 if(histIn.length>MAX)histIn.shift();if(histOut.length>MAX)histOut.shift();
-renderSF(d);renderConns(d.connections);checkSpike(d,now);
+renderSF(d,now);renderConns(d.connections);checkSpike(d,now);
 if(!$("t-targets").classList.contains("hide"))renderTargets(d);
 if(seq%5===0)loadRuntime();
 draw();
