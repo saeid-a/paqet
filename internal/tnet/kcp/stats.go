@@ -18,69 +18,119 @@ type Sample struct {
 	SRTTVar      int64
 	NumSessions  int
 	NumStreams   int
+	MaxStreams   int
+	OldestAgeSec int64
 	RetransSegs  uint64
 	LostSegs     uint64
 	FECRecovered uint64
 }
 
 var (
-	statMu   sync.RWMutex
-	sessions = make(map[*kcp.UDPSession]*smux.Session)
+	statMu        sync.RWMutex
+	sessions      = make(map[*smux.Session]*kcp.UDPSession)
+	streamStarted = make(map[*smux.Stream]time.Time)
 )
 
 func trackSession(udp *kcp.UDPSession, sess *smux.Session) {
-	if udp == nil {
+	if sess == nil {
 		return
 	}
 	statMu.Lock()
-	sessions[udp] = sess
+	sessions[sess] = udp
 	statMu.Unlock()
 }
 
-func untrackSession(udp *kcp.UDPSession) {
-	if udp == nil {
+func untrackSession(sess *smux.Session) {
+	if sess == nil {
 		return
 	}
 	statMu.Lock()
-	delete(sessions, udp)
+	delete(sessions, sess)
 	statMu.Unlock()
 }
 
-// SampleNow averages GetSRTT/GetRTO/GetSRTTVar over live sessions (0 when
-// none), merges kcp-go DefaultSnmp counters + ring-buffer depths, sums
-// smux NumStreams, and pushes everything to metrics. Never logs.
+// noteStreamOpen records a live stream's start for oldest-age tracking.
+// Called from newStrm; Ping's short-lived raw streams are excluded.
+func noteStreamOpen(st *smux.Stream) {
+	if st == nil {
+		return
+	}
+	statMu.Lock()
+	streamStarted[st] = time.Now()
+	statMu.Unlock()
+}
+
+func noteStreamClose(st *smux.Stream) {
+	if st == nil {
+		return
+	}
+	statMu.Lock()
+	delete(streamStarted, st)
+	statMu.Unlock()
+}
+
+// SampleNow prunes closed sessions (ghost fix: NumConns counts live only),
+// averages GetSRTT/GetRTO/GetSRTTVar over live sessions (0 when none),
+// merges kcp-go DefaultSnmp counters + ring-buffer depths, sums smux
+// NumStreams plus per-session max, oldest live-stream age, and pushes
+// everything to metrics. Never logs.
 func SampleNow() Sample {
-	statMu.RLock()
-	udps := make([]*kcp.UDPSession, 0, len(sessions))
-	smuxes := make([]*smux.Session, 0, len(sessions))
-	for u, s := range sessions {
-		udps = append(udps, u)
-		smuxes = append(smuxes, s)
+	now := time.Now()
+	statMu.Lock()
+	for sess := range sessions {
+		if sess == nil || sess.IsClosed() {
+			delete(sessions, sess)
+		}
 	}
-	statMu.RUnlock()
+	smuxes := make([]*smux.Session, 0, len(sessions))
+	udps := make([]*kcp.UDPSession, 0, len(sessions))
+	for sess, udp := range sessions {
+		smuxes = append(smuxes, sess)
+		udps = append(udps, udp)
+	}
+	var oldest time.Time
+	for _, start := range streamStarted {
+		if oldest.IsZero() || start.Before(oldest) {
+			oldest = start
+		}
+	}
+	statMu.Unlock()
 
 	var sumSRTT, sumRTO, sumVar int64
+	var live int64
 	for _, u := range udps {
 		if u == nil {
 			continue
 		}
+		live++
 		sumSRTT += int64(u.GetSRTT())
 		sumRTO += int64(u.GetRTO())
 		sumVar += int64(u.GetSRTTVar())
 	}
 	var srtt, rto, srttVar int64
-	if n := int64(len(udps)); n > 0 {
-		srtt, rto, srttVar = sumSRTT/n, sumRTO/n, sumVar/n
+	if live > 0 {
+		srtt, rto, srttVar = sumSRTT/live, sumRTO/live, sumVar/live
 	}
 
 	snmp := kcp.DefaultSnmp.Copy()
 
-	numStreams := 0
+	numStreams, maxStreams := 0, 0
 	for _, s := range smuxes {
 		if s == nil || s.IsClosed() {
 			continue
 		}
-		numStreams += s.NumStreams()
+		n := s.NumStreams()
+		numStreams += n
+		if n > maxStreams {
+			maxStreams = n
+		}
+	}
+
+	var oldestAgeSec int64
+	if !oldest.IsZero() {
+		if d := now.Sub(oldest); d > 0 {
+			oldestAgeSec = int64(d.Seconds())
+		}
 	}
 
 	var m runtime.MemStats
@@ -90,20 +140,22 @@ func SampleNow() Sample {
 	metrics.SetKCPQuality(snmp.RetransSegs, int64(snmp.FECRecovered))
 	metrics.SetKCPDetail(srttVar, snmp.LostSegs, snmp.RepeatSegs, snmp.FastRetransSegs, snmp.EarlyRetransSegs, snmp.FECRecovered, snmp.FECErrs, snmp.FECParityShards, snmp.InSegs, snmp.OutSegs)
 	metrics.SetTransportSnapshot(metrics.TransportStats{
-		SndQueue:       int64(snmp.RingBufferSndQueue),
-		RcvQueue:       int64(snmp.RingBufferRcvQueue),
-		SndBuf:         int64(snmp.RingBufferSndBuffer),
-		NumStreams:     int64(numStreams),
-		NumConns:       int64(len(udps)),
-		HeapAllocBytes: m.HeapAlloc,
-		SysBytes:       m.Sys,
-		GCCycles:       uint64(m.NumGC),
-		RetransSegs:    snmp.RetransSegs,
-		LostSegs:       snmp.LostSegs,
-		FECRecovered:   snmp.FECRecovered,
+		SndQueue:           int64(snmp.RingBufferSndQueue),
+		RcvQueue:           int64(snmp.RingBufferRcvQueue),
+		SndBuf:             int64(snmp.RingBufferSndBuffer),
+		NumStreams:         int64(numStreams),
+		NumConns:           int64(len(smuxes)),
+		MaxStreamsPerConn:  int64(maxStreams),
+		OldestStreamAgeSec: oldestAgeSec,
+		HeapAllocBytes:     m.HeapAlloc,
+		SysBytes:           m.Sys,
+		GCCycles:           uint64(m.NumGC),
+		RetransSegs:        snmp.RetransSegs,
+		LostSegs:           snmp.LostSegs,
+		FECRecovered:       snmp.FECRecovered,
 	})
 
-	return Sample{SRTT: srtt, RTO: rto, SRTTVar: srttVar, NumSessions: len(udps), NumStreams: numStreams, RetransSegs: snmp.RetransSegs, LostSegs: snmp.LostSegs, FECRecovered: snmp.FECRecovered}
+	return Sample{SRTT: srtt, RTO: rto, SRTTVar: srttVar, NumSessions: len(smuxes), NumStreams: numStreams, MaxStreams: maxStreams, OldestAgeSec: oldestAgeSec, RetransSegs: snmp.RetransSegs, LostSegs: snmp.LostSegs, FECRecovered: snmp.FECRecovered}
 }
 
 // StartStatsLoop samples every 2s until stop closes. Safe to call once.

@@ -20,6 +20,7 @@ func (s *Strm) SID() int {
 
 func newStrm(stream *smux.Stream, connID uint64) *Strm {
 	metrics.IncStreams()
+	noteStreamOpen(stream)
 	if connID != 0 {
 		metrics.IncConnStreams(connID)
 	}
@@ -30,6 +31,7 @@ func (s *Strm) Close() error {
 	s.once.Do(func() {
 		if s.counted {
 			metrics.DecStreams()
+			noteStreamClose(s.Stream)
 			if s.connID != 0 {
 				metrics.DecConnStreams(s.connID)
 			}

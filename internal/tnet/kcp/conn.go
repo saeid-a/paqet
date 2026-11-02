@@ -28,6 +28,7 @@ func (c *Conn) OpenStrm() (tnet.Strm, error) {
 	strm, err := c.Session.OpenStream()
 	if err != nil {
 		metrics.IncFailure()
+		metrics.IncSmuxOpenFail()
 		return nil, err
 	}
 	return newStrm(strm, c.metricsID), nil
@@ -37,6 +38,7 @@ func (c *Conn) AcceptStrm() (tnet.Strm, error) {
 	strm, err := c.Session.AcceptStream()
 	if err != nil {
 		metrics.IncFailure()
+		metrics.IncSmuxAcceptFail()
 		return nil, err
 	}
 	return newStrm(strm, c.metricsID), nil
@@ -74,7 +76,7 @@ func (c *Conn) Close() error {
 		if c.metricsID != 0 {
 			metrics.UnregisterConnection(c.metricsID)
 		}
-		untrackSession(c.UDPSession)
+		untrackSession(c.Session)
 	})
 	if c.Session != nil {
 		if e := c.Session.Close(); e != nil {

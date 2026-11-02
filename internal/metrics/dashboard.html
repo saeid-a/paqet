@@ -520,12 +520,14 @@ var sq=pick(tr,"snd_queue","sndQueue",null),rq=pick(tr,"rcv_queue","rcvQueue",nu
 var ns=pick(tr,"num_streams","numStreams",null),nc=pick(tr,"num_conns","numConns",null);
 var fill=pick(tr,"target_fill","targetFill",null),cap=pick(tr,"target_cap","targetCap",null);
 var rtx=pick(tr,"retrans_segs","retransSegs",null),lost=pick(tr,"lost_segs","lostSegs",null),fec=pick(tr,"fec_recovered","fecRecovered",null);
-var hasT=sq!=null||rq!=null||sb!=null||ns!=null||nc!=null||fill!=null||rtx!=null||lost!=null||fec!=null;
+var mx=pick(tr,"max_streams_per_conn","maxStreamsPerConn",null),ops=pick(tr,"stream_opens","streamOpens",null),hwm=pick(tr,"stream_hwm","streamHWM",null);
+var age=pick(tr,"oldest_stream_age_sec","oldestStreamAgeSec",null),of=pick(tr,"smux_open_fail","smuxOpenFail",null),af=pick(tr,"smux_accept_fail","smuxAcceptFail",null);
+var hasT=sq!=null||rq!=null||sb!=null||ns!=null||nc!=null||fill!=null||rtx!=null||lost!=null||fec!=null||mx!=null||ops!=null||of!=null||af!=null;
 if(!hasT){setT("trQueues","—");setT("trStreams","—");setT("trHint","no data");return;}
 setT("trQueues","snd_q "+((sq==null||isNaN(+sq))?"—":fmtInt(sq))+" · rcv_q "+((rq==null||isNaN(+rq))?"—":fmtInt(rq))+" · snd_buf "+((sb==null||isNaN(+sb))?"—":fmtInt(sb)));
-setT("trStreams","streams "+((ns==null||isNaN(+ns))?"—":fmtInt(ns))+" · conns "+((nc==null||isNaN(+nc))?"—":fmtInt(nc))+" · fill "+((fill==null||isNaN(+fill))?"—":fmtInt(fill))+"/"+((cap==null||isNaN(+cap))?"—":fmtInt(cap))+" · retx "+((rtx==null||isNaN(+rtx))?"—":fmtInt(rtx))+" · lost "+((lost==null||isNaN(+lost))?"—":fmtInt(lost))+" · fec "+((fec==null||isNaN(+fec))?"—":fmtInt(fec)));
+setT("trStreams","streams "+((ns==null||isNaN(+ns))?"—":fmtInt(ns))+" · conns "+((nc==null||isNaN(+nc))?"—":fmtInt(nc))+" · max "+((mx==null||isNaN(+mx))?"—":fmtInt(mx))+" · opens "+((ops==null||isNaN(+ops))?"—":fmtInt(ops))+" (hwm "+((hwm==null||isNaN(+hwm))?"—":fmtInt(hwm))+") · oldest "+((age==null||isNaN(+age)||+age<=0)?"—":fmtDur(age))+" · smuxfail "+((of==null||isNaN(+of))?"—":fmtInt(of))+"/"+((af==null||isNaN(+af))?"—":fmtInt(af))+" · fill "+((fill==null||isNaN(+fill))?"—":fmtInt(fill))+"/"+((cap==null||isNaN(+cap))?"—":fmtInt(cap))+" · retx "+((rtx==null||isNaN(+rtx))?"—":fmtInt(rtx))+" · lost "+((lost==null||isNaN(+lost))?"—":fmtInt(lost))+" · fec "+((fec==null||isNaN(+fec))?"—":fmtInt(fec)));
 var hint="no data",q=(+sq||0)+(+rq||0),hasQ=sq!=null&&rq!=null;
-try{var cwnd=+pick(kcp,"cwnd","snd_wnd","wnd",0)||0;if(!hasQ)hint="no data";else if(q>0&&cwnd<=0)hint="congestion suspect — rising queue, cwnd flat";else if(q>0)hint="queue building — watch cwnd + loss";else if(q===0)hint="queues clear";}catch(e){hint="no data";}
+try{var cwnd=+pick(kcp,"cwnd","snd_wnd","wnd",0)||0;if((+of||0)+(+af||0)>0)hint="smux open/accept failing — session dead or full";else if(!hasQ)hint="no data";else if(q>0&&cwnd<=0)hint="congestion suspect — rising queue, cwnd flat";else if(q>0)hint="queue building — watch cwnd + loss";else if(q===0)hint="queues clear";}catch(e){hint="no data";}
 setT("trHint",hint);
 }
 // toasts: failure-spike + daemon disconnect/reconnect while the tab is open.

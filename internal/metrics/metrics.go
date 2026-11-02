@@ -61,19 +61,25 @@ type KCPStats struct {
 }
 
 type TransportStats struct {
-	SndQueue       int64  `json:"snd_queue"`
-	RcvQueue       int64  `json:"rcv_queue"`
-	SndBuf         int64  `json:"snd_buf"`
-	NumStreams     int64  `json:"num_streams"`
-	NumConns       int64  `json:"num_conns"`
-	HeapAllocBytes uint64 `json:"heap_alloc_bytes"`
-	SysBytes       uint64 `json:"sys_bytes"`
-	GCCycles       uint64 `json:"gc_cycles"`
-	TargetFill     int    `json:"target_fill"`
-	TargetCap      int    `json:"target_cap"`
-	RetransSegs    uint64 `json:"retrans_segs"`
-	LostSegs       uint64 `json:"lost_segs"`
-	FECRecovered   uint64 `json:"fec_recovered"`
+	SndQueue           int64  `json:"snd_queue"`
+	RcvQueue           int64  `json:"rcv_queue"`
+	SndBuf             int64  `json:"snd_buf"`
+	NumStreams         int64  `json:"num_streams"`
+	NumConns           int64  `json:"num_conns"`
+	MaxStreamsPerConn  int64  `json:"max_streams_per_conn"`
+	StreamOpens        uint64 `json:"stream_opens"`
+	StreamHWM          int64  `json:"stream_hwm"`
+	OldestStreamAgeSec int64  `json:"oldest_stream_age_sec"`
+	SmuxOpenFail       uint64 `json:"smux_open_fail"`
+	SmuxAcceptFail     uint64 `json:"smux_accept_fail"`
+	HeapAllocBytes     uint64 `json:"heap_alloc_bytes"`
+	SysBytes           uint64 `json:"sys_bytes"`
+	GCCycles           uint64 `json:"gc_cycles"`
+	TargetFill         int    `json:"target_fill"`
+	TargetCap          int    `json:"target_cap"`
+	RetransSegs        uint64 `json:"retrans_segs"`
+	LostSegs           uint64 `json:"lost_segs"`
+	FECRecovered       uint64 `json:"fec_recovered"`
 }
 
 type RuntimeStats struct {
@@ -115,6 +121,10 @@ var ingressPackets uint64
 var egressPackets uint64
 var activeConnections int64
 var activeStreams int64
+var streamOpensTotal uint64
+var streamHighWater int64
+var smuxOpenFail uint64
+var smuxAcceptFail uint64
 var successTotal uint64
 var failureTotal uint64
 var successTCP uint64
@@ -180,11 +190,26 @@ func DecConnections() {
 }
 
 func IncStreams() {
-	atomic.AddInt64(&activeStreams, 1)
+	n := atomic.AddInt64(&activeStreams, 1)
+	atomic.AddUint64(&streamOpensTotal, 1)
+	for {
+		h := atomic.LoadInt64(&streamHighWater)
+		if n <= h || atomic.CompareAndSwapInt64(&streamHighWater, h, n) {
+			break
+		}
+	}
 }
 
 func DecStreams() {
 	atomic.AddInt64(&activeStreams, -1)
+}
+
+func IncSmuxOpenFail() {
+	atomic.AddUint64(&smuxOpenFail, 1)
+}
+
+func IncSmuxAcceptFail() {
+	atomic.AddUint64(&smuxAcceptFail, 1)
 }
 
 func IncSuccess() {
@@ -261,6 +286,8 @@ var trRcvQueue int64
 var trSndBuf int64
 var trNumStreams int64
 var trNumConns int64
+var trMaxStreamsPerConn int64
+var trOldestStreamAgeSec int64
 var trHeapAlloc uint64
 var trSys uint64
 var trGCCycles uint64
@@ -299,6 +326,14 @@ func SetTransportSnapshot(s TransportStats) {
 	atomic.StoreInt64(&trSndBuf, s.SndBuf)
 	atomic.StoreInt64(&trNumStreams, s.NumStreams)
 	atomic.StoreInt64(&trNumConns, s.NumConns)
+	atomic.StoreInt64(&trMaxStreamsPerConn, s.MaxStreamsPerConn)
+	atomic.StoreInt64(&trOldestStreamAgeSec, s.OldestStreamAgeSec)
+	if s.SmuxOpenFail != 0 {
+		atomic.StoreUint64(&smuxOpenFail, s.SmuxOpenFail)
+	}
+	if s.SmuxAcceptFail != 0 {
+		atomic.StoreUint64(&smuxAcceptFail, s.SmuxAcceptFail)
+	}
 	atomic.StoreUint64(&trHeapAlloc, s.HeapAllocBytes)
 	atomic.StoreUint64(&trSys, s.SysBytes)
 	atomic.StoreUint64(&trGCCycles, s.GCCycles)
@@ -632,11 +667,17 @@ func SnapshotNow() Snapshot {
 		Targets:     TopTargets(maxTargetEntries),
 		Connections: connSnaps,
 		Transport: TransportStats{
-			SndQueue:       atomic.LoadInt64(&trSndQueue),
-			RcvQueue:       atomic.LoadInt64(&trRcvQueue),
-			SndBuf:         atomic.LoadInt64(&trSndBuf),
-			NumStreams:     atomic.LoadInt64(&trNumStreams),
-			NumConns:       atomic.LoadInt64(&trNumConns),
+			SndQueue:           atomic.LoadInt64(&trSndQueue),
+			RcvQueue:           atomic.LoadInt64(&trRcvQueue),
+			SndBuf:             atomic.LoadInt64(&trSndBuf),
+			NumStreams:         atomic.LoadInt64(&trNumStreams),
+			NumConns:           atomic.LoadInt64(&trNumConns),
+			MaxStreamsPerConn:  atomic.LoadInt64(&trMaxStreamsPerConn),
+			StreamOpens:        atomic.LoadUint64(&streamOpensTotal),
+			StreamHWM:          atomic.LoadInt64(&streamHighWater),
+			OldestStreamAgeSec: atomic.LoadInt64(&trOldestStreamAgeSec),
+			SmuxOpenFail:       atomic.LoadUint64(&smuxOpenFail),
+			SmuxAcceptFail:     atomic.LoadUint64(&smuxAcceptFail),
 			HeapAllocBytes: atomic.LoadUint64(&trHeapAlloc),
 			SysBytes:       atomic.LoadUint64(&trSys),
 			GCCycles:       atomic.LoadUint64(&trGCCycles),
