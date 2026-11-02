@@ -1,11 +1,14 @@
 package metrics
 
 import (
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"net"
 	"net/http"
 	"os"
 	"runtime"
+	"time"
 
 	"paqet/internal/conf"
 )
@@ -17,6 +20,8 @@ type PostureResponse struct {
 	IsLoopback        bool   `json:"is_loopback"`
 	TokenSet          bool   `json:"token_set"`
 	TLSEnabled        bool   `json:"tls_enabled"`
+	TLSExpiry         string `json:"tls_expiry,omitempty"`
+	TLSError          string `json:"tls_error,omitempty"`
 	Exposure          string `json:"exposure"`
 	Role              string `json:"role"`
 	ConfigPath        string `json:"config_path"`
@@ -56,6 +61,24 @@ func exposureFor(bindLoopback, clientLoopback bool, token string, tls bool) stri
 	return "warn"
 }
 
+// tlsExpiry reads the first cert block from certPath and returns its
+// NotAfter as RFC3339, or an error string when unreadable/unparseable.
+func tlsExpiry(certPath string) (string, string) {
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return "", err.Error()
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return "", "no PEM block found"
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", err.Error()
+	}
+	return cert.NotAfter.UTC().Format(time.RFC3339), ""
+}
+
 func buildPosture(r *http.Request) PostureResponse {
 	bind := defaultAdminBind
 	role := "unknown"
@@ -75,7 +98,7 @@ func buildPosture(r *http.Request) PostureResponse {
 	tls := getTLSCert() != "" && getTLSKey() != ""
 	bindLoopback := bindIsLoopback(bind)
 	clientLoopback := net.ParseIP(remoteIP(r)).IsLoopback()
-	return PostureResponse{
+	p := PostureResponse{
 		Bind:              bind,
 		IsLoopback:        bindLoopback,
 		TokenSet:          token != "",
@@ -85,6 +108,10 @@ func buildPosture(r *http.Request) PostureResponse {
 		ConfigPath:        getConfigPath(),
 		FirewallSupported: runtime.GOOS == "linux",
 	}
+	if tls {
+		p.TLSExpiry, p.TLSError = tlsExpiry(getTLSCert())
+	}
+	return p
 }
 
 func postureHandler(w http.ResponseWriter, r *http.Request) {

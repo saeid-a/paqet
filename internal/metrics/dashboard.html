@@ -476,6 +476,10 @@ function pick(o){for(var i=1;i<arguments.length;i++){var k=arguments[i];if(o&&o[
 function fmtMs(v){if(v==null||v===""||isNaN(+v))return "—";return (+v)+" ms";}
 var lastStatus=null;
 var lastCfg="";
+var lastOk=0;
+// staleness: footer shows age of the last good poll while the daemon is
+// unreachable, so stale numbers are never mistaken for live ones.
+function markStale(){if(!lastOk){setT("ts","no data — daemon unreachable");return;}setT("ts","stale "+fmtDur((Date.now()-lastOk)/1000)+" · "+String((lastStatus&&lastStatus.timestamp)||""));}
 // toasts: failure-spike + daemon disconnect/reconnect while the tab is open.
 // Throttled (one spike toast per 2 min) and capped at 4; the header
 // notice remains the persistent indicator, toasts are the nudge.
@@ -528,7 +532,7 @@ var delta=f-base.f;
 if(delta>=cfg.thr&&now-lastSpike>120000){lastSpike=now;toast("failure spike: +"+fmtInt(delta)+" failures in ~1 min","warn");}
 }
 function tick(d){
-lastStatus=d;
+lastStatus=d;lastOk=Date.now();
 setT("role",String(d.role||"unknown"));setT("uptime",(d.running?"● running · ":"○ stopped · ")+fmtDur(d.uptime_seconds));
 setT("ver",(d.build&&d.build.version?d.build.version:"")+(d.build&&d.build.git_commit?" ("+String(d.build.git_commit).slice(0,7)+")":""));
 setT("cfgPath",(d.config_path||"")+(d.build&&d.build.platform?" · "+d.build.platform:""));setT("cfgPath2",d.config_path||"");
@@ -567,7 +571,23 @@ function renderPosture(p){
 p=p||{};
 var ex=String(p.exposure||"unknown"),v=$("postureExp");
 if(v){v.textContent=ex;v.className="v num "+(ex==="safe"?"ok-t":ex==="critical"?"bad-t":"");v.style.color=ex==="warn"?"var(--amber)":"";}
-setT("postureSub",String(p.bind||"\u2014")+" \u00b7 token:"+(p.token_set?"set":"unset")+" \u00b7 tls:"+(p.tls_enabled?"on":"off"));
+var sub=$("postureSub");
+if(sub){
+while(sub.firstChild)sub.removeChild(sub.firstChild);
+sub.appendChild(document.createTextNode(String(p.bind||"\u2014")+" \u00b7 token:"+(p.token_set?"set":"unset")+" \u00b7 "));
+var tls=document.createElement("span");
+if(!p.tls_enabled){tls.textContent="tls:off";}
+else if(p.tls_error){tls.textContent="tls:cert error";tls.className="bad-t";tls.title=String(p.tls_error);}
+else if(p.tls_expiry){tls.textContent="tls:on (exp "+String(p.tls_expiry).slice(0,10)+")";tls.title=String(p.tls_expiry);}
+else{tls.textContent="tls:on";}
+sub.appendChild(tls);
+if(p.tls_enabled&&p.tls_error){
+var lk=document.createElement("a");lk.href="#config";lk.textContent="validate";lk.title=String(p.tls_error);
+lk.onclick=function(){showTab("config");};
+sub.appendChild(document.createTextNode(" "));
+sub.appendChild(lk);
+}
+}
 var bn=$("exposureBanner");if(!bn)return;
 if(ex==="critical"){bn.className="note";bn.style.border="1px solid var(--red)";bn.style.color="var(--red)";bn.textContent="Exposed: non-loopback without token \u2014 set admin.token + TLS, bind 127.0.0.1";bn.classList.remove("hide");}
 else if(ex==="warn"){bn.className="note warn";bn.style.border="";bn.style.color="";bn.textContent="Loopback without token \u2014 anyone on this host can edit config";bn.classList.remove("hide");}
@@ -576,7 +596,7 @@ try{renderSshSnippet(p.bind);}catch(e){}
 }
 function loadPosture(){return api("api/safety/posture",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){renderPosture(d||{});}).catch(function(){});}
 function loadRuntime(){return api("api/runtime",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){d=d||{};var g=d.goroutines;var heap=d.mem_heap_bytes!=null?d.mem_heap_bytes:d.mem_alloc_bytes;var sys=d.mem_sys_bytes;var gc=d.mem_gc_cycles;var gv=d.go_version||"";var os=d.goos||"",arch=d.goarch||"";var cpu=d.num_cpu;var el=$("rtDetailBody");if(el)el.textContent=fmtInt(g)+" \u00b7 heap "+fmtBytes(heap)+" / sys "+fmtBytes(sys)+" \u00b7 gc "+fmtInt(gc)+" \u00b7 "+gv+" "+os+"/"+arch+" \u00b7 cpu "+fmtInt(cpu);}).catch(function(){var el=$("rtDetailBody");if(el)el.textContent="unavailable \u2014 continuing";});}
-function poll(){var s=++seq;if(!postureLoaded){postureLoaded=true;loadPosture();}if(document.hidden){setTimeout(poll,2000);return;}api("api/status",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(s!==seq)return;if(wasOk===false&&!document.hidden)toast("reconnected to daemon","ok");wasOk=true;markOk(true,d.running);tick(d);}).catch(function(e){if(s!==seq)return;if(wasOk!==false&&!document.hidden)toast("daemon unreachable — retrying…","err");wasOk=false;markOk(false,false,String((e&&e.message)||e));}).finally(function(){setTimeout(poll,2000);});}
+function poll(){var s=++seq;if(!postureLoaded){postureLoaded=true;loadPosture();}if(document.hidden){setTimeout(poll,2000);return;}api("api/status",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(s!==seq)return;if(wasOk===false&&!document.hidden)toast("reconnected to daemon","ok");wasOk=true;markOk(true,d.running);tick(d);}).catch(function(e){if(s!==seq)return;if(wasOk!==false&&!document.hidden)toast("daemon unreachable — retrying…","err");wasOk=false;markOk(false,false,String((e&&e.message)||e));markStale();}).finally(function(){setTimeout(poll,2000);});}
 function control(action){
 notice("");var b={start:$("bStart"),stop:$("bStop"),restart:$("bRestart")}[action];if(b)b.disabled=true;
 api("api/control",{method:"POST",body:JSON.stringify({action:action})}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(o){
