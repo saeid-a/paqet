@@ -175,7 +175,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="card"><div class="k">Packets out</div><div class="v num" id="pOut">—</div><div class="s num" id="pOutR">—</div></div>
 <div class="card"><div class="k">Active conns</div><div class="v num" id="aConn">—</div><div class="s">connections</div></div>
 <div class="card"><div class="k">Active streams</div><div class="v num" id="aStr">—</div><div class="s">streams</div></div>
-<div class="card"><div class="k">Runtime</div><div class="v num" id="rtGo">—</div><div class="s num" id="rtMem">—</div></div>
+<div class="card"><div class="k">Runtime</div><div class="v num" id="rtGo">—</div><div class="s num" id="rtMem">—</div><details id="rtDetail"><summary class="mono">runtime detail</summary><div class="mono" id="rtDetailBody">loading…</div></details></div>
 <div class="card"><div class="k">KCP</div><div class="v num" id="kcpRtt">—</div><div class="s num" id="kcpSub">—</div></div>
 <div class="card" id="postureCard"><div class="k">Security posture</div><div class="v num" id="postureExp">—</div><div class="s mono" id="postureSub">—</div></div>
 </div>
@@ -379,7 +379,7 @@ function api(p,o){o=o||{};o.headers=authH(o.headers||{});return fetch(p,o);}
 // tabs
 var TABS=["overview","conns","targets","config","logs","diag","setup"];
 var tabs=document.querySelectorAll("button.tab");
-function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();}if(t==="diag")loadIfaces(true);if(t==="setup")loadPreflight();if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview")loadPosture();}
+function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();}if(t==="diag")loadIfaces(true);if(t==="setup")loadPreflight();if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview"){loadPosture();loadRuntime();}}
 tabs.forEach(function(b){b.onclick=function(){showTab(b.dataset.t);};});
 document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=7)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
 // modal drawer
@@ -507,6 +507,7 @@ histIn.push(rIn);histOut.push(rOut);
 if(histIn.length>MAX)histIn.shift();if(histOut.length>MAX)histOut.shift();
 renderSF(d);renderConns(d.connections);checkSpike(d,now);
 if(!$("t-targets").classList.contains("hide"))renderTargets(d);
+if(seq%5===0)loadRuntime();
 draw();
 }
 // security posture (Task 4): best-effort GET via auth wrapper so the
@@ -523,6 +524,7 @@ else if(ex==="warn"){bn.className="note warn";bn.style.border="";bn.style.color=
 else bn.classList.add("hide");
 }
 function loadPosture(){return api("api/safety/posture",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){renderPosture(d||{});}).catch(function(){});}
+function loadRuntime(){return api("api/runtime",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){d=d||{};var g=d.goroutines;var heap=d.mem_heap_bytes!=null?d.mem_heap_bytes:d.mem_alloc_bytes;var sys=d.mem_sys_bytes;var gc=d.mem_gc_cycles;var gv=d.go_version||"";var os=d.goos||"",arch=d.goarch||"";var cpu=d.num_cpu;var el=$("rtDetailBody");if(el)el.textContent=fmtInt(g)+" \u00b7 heap "+fmtBytes(heap)+" / sys "+fmtBytes(sys)+" \u00b7 gc "+fmtInt(gc)+" \u00b7 "+gv+" "+os+"/"+arch+" \u00b7 cpu "+fmtInt(cpu);}).catch(function(){var el=$("rtDetailBody");if(el)el.textContent="unavailable \u2014 continuing";});}
 function poll(){var s=++seq;if(!postureLoaded){postureLoaded=true;loadPosture();}if(document.hidden){setTimeout(poll,2000);return;}api("api/status",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(s!==seq)return;if(wasOk===false&&!document.hidden)toast("reconnected to daemon","ok");wasOk=true;markOk(true,d.running);tick(d);}).catch(function(e){if(s!==seq)return;if(wasOk!==false&&!document.hidden)toast("daemon unreachable — retrying…","err");wasOk=false;markOk(false,false,String((e&&e.message)||e));}).finally(function(){setTimeout(poll,2000);});}
 function control(action){
 notice("");var b={start:$("bStart"),stop:$("bStop"),restart:$("bRestart")}[action];if(b)b.disabled=true;
