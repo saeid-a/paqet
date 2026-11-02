@@ -175,9 +175,10 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="card"><div class="k">Packets out</div><div class="v num" id="pOut">—</div><div class="s num" id="pOutR">—</div></div>
 <div class="card"><div class="k">Active conns</div><div class="v num" id="aConn">—</div><div class="s">connections</div></div>
 <div class="card"><div class="k">Active streams</div><div class="v num" id="aStr">—</div><div class="s">streams</div></div>
-<div class="card"><div class="k">Runtime</div><div class="v num" id="rtGo">—</div><div class="s num" id="rtMem">—</div><details id="rtDetail"><summary class="mono">runtime detail</summary><div class="mono" id="rtDetailBody">loading…</div></details></div>
+<div class="card"><div class="k">Runtime</div><div class="v num" id="rtGo">—</div><div class="s num" id="rtMem">—</div><div class="s num" id="rtGc">—</div><details id="rtDetail"><summary class="mono">runtime detail</summary><div class="mono" id="rtDetailBody">loading…</div></details></div>
 <div class="card"><div class="k">KCP</div><div class="v num" id="kcpRtt">—</div><div class="s num" id="kcpSub">—</div><div class="s num" id="kcpLoss">—</div></div>
 <div class="card" id="postureCard"><div class="k">Security posture</div><div class="v num" id="postureExp">—</div><div class="s mono" id="postureSub">—</div></div>
+<div class="card"><div class="k">Config</div><div class="v num mono" id="cfgSum" style="font-size:15px">—</div><div class="s mono" id="cfgSub">—</div><div class="s mono" id="cfgHealth">—</div></div>
 </div>
 <div class="panel"><h2>Throughput (last 120s)</h2><canvas id="spark" width="600" height="140"></canvas>
 <div class="legend"><span><span class="sw" style="background:var(--grn)"></span>in <span class="mono" id="lgIn"></span></span><span><span class="sw" style="background:var(--blu)"></span>out <span class="mono" id="lgOut"></span></span><span><span class="sw" style="background:var(--amber)"></span>failure spike</span></div>
@@ -185,7 +186,8 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="legend"><span><span class="sw" style="background:var(--blu)"></span>conns <span class="mono" id="lgConn"></span></span><span><span class="sw" style="background:var(--cyn)"></span>streams <span class="mono" id="lgStr"></span></span></div>
 <div class="row"><label class="chk">spike +<input type="number" id="alertThr" value="10" min="1" max="1000" style="width:64px"> /min</label><label class="chk"><input type="checkbox" id="alertMute"> mute</label></div>
 </div>
-<div class="panel"><h2>Success / failure</h2><div class="wrap"><table id="sf"><tr><th>Channel</th><th class="n">Success</th><th class="n">Failure</th><th class="n">Succ/s</th><th class="n">Fail/s</th></tr></table></div></div>
+<div class="panel"><h2>Success / failure</h2><div class="note" id="sfNote"></div><div class="wrap"><table id="sf"><tr><th>Channel</th><th class="n">Success</th><th class="n">Failure</th><th class="n">Succ/s</th><th class="n">Fail/s</th><th>health</th></tr></table></div></div>
+<div class="panel"><h2>Health</h2><div class="mono" id="healthBody" style="white-space:pre-wrap">loading…</div></div>
 <p class="note">Click a connection row for JSON detail.</p>
 </section>
 
@@ -199,7 +201,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <section id="t-targets" class="hide">
 <div class="panel"><h2>Targets</h2>
 <div class="row"><button id="bCsv">Export CSV</button><span class="note" id="tgtNote"></span></div>
-<div class="wrap"><table><thead><tr><th>target</th><th class="n">in</th><th class="n">out</th><th class="n">success</th><th class="n">fail</th><th>success-rate</th><th>avg-rtt</th></tr></thead><tbody id="tgtBody"></tbody></table>
+<div class="wrap"><table><thead><tr><th>target</th><th class="n">in</th><th class="n">out</th><th class="n">success</th><th class="n">fail</th><th>success-rate</th><th>avg-rtt</th><th>health</th></tr></thead><tbody id="tgtBody"></tbody></table>
 <div class="empty" id="tgtEmpty">no targets</div></div></div>
 <div class="panel"><h2>Listeners</h2>
 <div class="row"><button id="bLstRefresh">Refresh</button><span class="note" id="lstNote"></span></div>
@@ -394,10 +396,12 @@ function openModal(c){setT("modalBody",JSON.stringify(c,null,2));$("modal").clas
 $("modalX").onclick=function(){$("modal").classList.add("hide");};
 $("modal").addEventListener("click",function(e){if(e.target===this)this.classList.add("hide");});
 function fmtCountRate(n){n=+n||0;return n.toFixed(2)+" /s";}
-function sfRow(name,ok,fail,okr,failr){var tr=document.createElement("tr"),a=document.createElement("td"),b=document.createElement("td"),c=document.createElement("td"),d=document.createElement("td"),e=document.createElement("td");a.textContent=name;b.textContent=fmtInt(ok);b.className="n num ok-t";c.textContent=fmtInt(fail);c.className="n num bad-t";d.textContent=fmtCountRate(okr);d.className="n num";e.textContent=fmtCountRate(failr);e.className="n num";tr.appendChild(a);tr.appendChild(b);tr.appendChild(c);tr.appendChild(d);tr.appendChild(e);return tr;}
+function sfHealth(fail,failr){fail=fail==null?null:+fail;failr=+failr||0;if(fail==null||isNaN(fail))return{t:"unknown",c:""};if(fail===0)return{t:"ok",c:"ok-t"};if(failr>0.5)return{t:"failing",c:"bad-t"};return{t:"degraded",c:"amber"};}
+function winRead(w){if(!w||w.length<2)return 0;var o=w[0],n=w[w.length-1],dt=(n.t-o.t)/1000;if(!(dt>0))return 0;return Math.max(0,(n.v-o.v)/dt);}
+function sfRow(name,ok,fail,okr,failr,h){var tr=document.createElement("tr"),a=document.createElement("td"),b=document.createElement("td"),c=document.createElement("td"),d=document.createElement("td"),e=document.createElement("td"),f=document.createElement("td");a.textContent=name;b.textContent=fmtInt(ok);b.className="n num ok-t";c.textContent=fmtInt(fail);c.className="n num bad-t";d.textContent=fmtCountRate(okr);d.className="n num";e.textContent=fmtCountRate(failr);e.className="n num";f.textContent=h.t;f.className="mono";if(h.c==="ok-t"||h.c==="bad-t")f.className+=" "+h.c;else if(h.c==="amber")f.style.color="var(--amber)";tr.appendChild(a);tr.appendChild(b);tr.appendChild(c);tr.appendChild(d);tr.appendChild(e);tr.appendChild(f);return tr;}
 var sfBody=null,sfWins={};
 function sfRate(key,v,now){var w=sfWins[key]||(sfWins[key]=[]);return winRate(w,v,now,0);}
-function renderSF(d,now){now=+now||Date.now();if(!sfBody){sfBody=document.createElement("tbody");$("sf").appendChild(sfBody);}while(sfBody.firstChild)sfBody.removeChild(sfBody.firstChild);var rows=[["total","st",d.success_total,d.failure_total],["tcp","tcp",d.success_tcp,d.failure_tcp],["udp","udp",d.success_udp,d.failure_udp],["socks","socks",d.success_socks,d.failure_socks],["fwd tcp","ftcp",d.success_forward_tcp,d.failure_forward_tcp],["fwd udp","fudp",d.success_forward_udp,d.failure_forward_udp]];for(var i=0;i<rows.length;i++){var r=rows[i];sfBody.appendChild(sfRow(r[0],r[2],r[3],sfRate(r[1]+"_ok",r[2],now),sfRate(r[1]+"_fail",r[3],now)));}}
+function renderSF(d,now){now=+now||Date.now();if(!sfBody){sfBody=document.createElement("tbody");$("sf").appendChild(sfBody);}while(sfBody.firstChild)sfBody.removeChild(sfBody.firstChild);var rows=[["total","st",d.success_total,d.failure_total],["tcp","tcp",d.success_tcp,d.failure_tcp],["udp","udp",d.success_udp,d.failure_udp],["socks","socks",d.success_socks,d.failure_socks],["fwd tcp","ftcp",d.success_forward_tcp,d.failure_forward_tcp],["fwd udp","fudp",d.success_forward_udp,d.failure_forward_udp]];var bad=[];for(var i=0;i<rows.length;i++){var r=rows[i],okr=sfRate(r[1]+"_ok",r[2],now),failr=sfRate(r[1]+"_fail",r[3],now),h=sfHealth(r[3],failr);if(h.t==="failing"||h.t==="degraded")bad.push(r[0]+" ("+fmtCountRate(failr)+" fail)");sfBody.appendChild(sfRow(r[0],r[2],r[3],okr,failr,h));}setT("sfNote",bad.length?("attention: "+bad.join(" · ")):(((+d.failure_total||0)>0)?"failures present but quiet":"all channels clean"));}
 // per-connection live rates: one sliding window per conn id, same 10s
 // winRate helper as the cards. Windows for vanished ids are pruned.
 var connWins={},connSort={key:"tot",dir:-1};
@@ -457,14 +461,17 @@ if(v!=null&&v!==""&&!isNaN(+v)){sum+=+v;n++;}});
 return {rate:rate,rtt:n?sum/n:null};
 }
 // targets: prefer d.targets, else aggregate connections by remote
+function tgtHealthClass(rate,fail){if(rate==null||isNaN(+rate))return{t:"unknown",c:""};if(+rate>=0.99&&(+fail||0)===0)return{t:"healthy",c:"ok-t"};if(+rate>=0.95)return{t:"degraded",c:"amber"};return{t:"failing",c:"bad-t"};}
+function tgtSummary(d,h,df,f){var base=(d&&Array.isArray(d.targets))?"":((tgtRows||[]).length?"aggregated from connections (no per-target API)":"no target data (endpoint unavailable)");var s=h+" healthy · "+df+" degraded · "+f+" failing · fill "+(tgtRows||[]).length+"/100";return base?base+" · "+s:s;}
 function renderTargets(d){
 var rows=[];
 if(d&&Array.isArray(d.targets)){rows=d.targets.map(function(t){return{name:String(t.target||t.name||t.addr||"?"),bi:+t.bytes_in||0,bo:+t.bytes_out||0,ok:(t.success!=null?+t.success:0),fail:(t.failure!=null?+t.failure:(t.fail!=null?+t.fail:0))};});setT("tgtNote","");}
 else{var m={};(d.connections||[]).forEach(function(c){var k=String(c.remote_addr||"?");var e=m[k]||(m[k]={name:k,bi:0,bo:0,ok:null,fail:null,n:0});e.bi+=+c.bytes_in||0;e.bo+=+c.bytes_out||0;e.n++;});Object.keys(m).forEach(function(k){rows.push(m[k]);});setT("tgtNote",rows.length?"aggregated from connections (no per-target API)":"no target data (endpoint unavailable)");}
 tgtRows=rows;
 var tb=$("tgtBody");while(tb.firstChild)tb.removeChild(tb.firstChild);
+var hcH=0,hcD=0,hcF=0;
 $("tgtEmpty").style.display=rows.length?"none":"block";
-for(var i=0;i<rows.length&&i<500;i++){var r=rows[i],h=tgtHealth(r),tr=document.createElement("tr");var tds=[r.name,fmtBytes(r.bi),fmtBytes(r.bo),r.ok==null?"—":fmtInt(r.ok),r.fail==null?"—":fmtInt(r.fail),h.rate==null?"—":(h.rate*100).toFixed(1)+"%",fmtMs(h.rtt)];for(var j=0;j<tds.length;j++){var td=document.createElement("td");td.textContent=tds[j];td.className=j===0?"mono":"n num";if(j===3)td.className="n num ok-t";if(j===4)td.className="n num bad-t";tr.appendChild(td);}tb.appendChild(tr);}
+for(var i=0;i<rows.length&&i<500;i++){var r=rows[i],h=tgtHealth(r),hc=tgtHealthClass(h.rate,r.fail),tr=document.createElement("tr");if(hc.t==="healthy")hcH++;else if(hc.t==="degraded")hcD++;else if(hc.t==="failing")hcF++;var tds=[r.name,fmtBytes(r.bi),fmtBytes(r.bo),r.ok==null?"—":fmtInt(r.ok),r.fail==null?"—":fmtInt(r.fail),h.rate==null?"—":(h.rate*100).toFixed(1)+"%",fmtMs(h.rtt),hc.t];for(var j=0;j<tds.length;j++){var td=document.createElement("td");td.textContent=tds[j];td.className=j===0?"mono":"n num";if(j===3)td.className="n num ok-t";if(j===4)td.className="n num bad-t";if(j===7){td.className="mono";if(hc.c==="ok-t"||hc.c==="bad-t")td.className+=" "+hc.c;else if(hc.c==="amber")td.style.color="var(--amber)";}tr.appendChild(td);}tb.appendChild(tr);setT("tgtNote",tgtSummary(d,hcH,hcD,hcF));}
 }
 // shared CSV cell quoting with formula-injection guard; reused by both
 // targets and connections export handlers.
@@ -487,6 +494,8 @@ function pick(o){for(var i=1;i<arguments.length;i++){var k=arguments[i];if(o&&o[
 function fmtMs(v){if(v==null||v===""||isNaN(+v))return "—";return (+v)+" ms";}
 var lastStatus=null;
 var lastCfg="";
+var lastPreflight=null,lastListeners=null,lastPostureM=null,cfgBackupsN=null,heapPrev={t:0,v:0},gcRmin="";
+var gcWin=[],retxWin=[];
 // toasts: failure-spike + daemon disconnect/reconnect while the tab is open.
 // Throttled (one spike toast per 2 min) and capped at 4; the header
 // notice remains the persistent indicator, toasts are the nudge.
@@ -572,15 +581,18 @@ histConn.push(+d.active_connections||0);histStr.push(+d.active_streams||0);
 if(histIn.length>MAX)histIn.shift();if(histOut.length>MAX)histOut.shift();
 if(histConn.length>MAX)histConn.shift();if(histStr.length>MAX)histStr.shift();
 renderSF(d,now);renderConns(d.connections);checkSpike(d,now);
-if(!$("t-targets").classList.contains("hide"))renderTargets(d);
+if(!$("t-targets").classList.contains("hide")||seq%5===0)renderTargets(d);
 if(seq%5===0)loadRuntime();
+if(seq===1){try{loadCfg(false);}catch(e){}}
+if(seq%10===0){try{loadHealthQuiet();}catch(e){}}
+try{renderHealth();}catch(e){}try{renderCfgSum();}catch(e){}
 draw();drawConn();
 }
 // security posture (Task 4): best-effort GET via auth wrapper so the
 // Bearer token from sessionStorage applies. Never breaks poll.
 var postureLoaded=false;
 function renderPosture(p){
-p=p||{};
+p=p||{};lastPostureM=p;
 var ex=String(p.exposure||"unknown"),v=$("postureExp");
 if(v){v.textContent=ex;v.className="v num "+(ex==="safe"?"ok-t":ex==="critical"?"bad-t":"");v.style.color=ex==="warn"?"var(--amber)":"";}
 var sub=$("postureSub");
@@ -606,8 +618,30 @@ else if(ex==="warn"){bn.className="note warn";bn.style.border="";bn.style.color=
 else bn.classList.add("hide");
 try{renderSshSnippet(p.bind);}catch(e){}
 }
+// effective KCP: preset expansion (mirrors aplConf) over manual values,
+// read from the loaded YAML via the indent-aware yGet helper.
+function effectiveKCP(){var y=String(lastCfg||""),mode=yGet(y,["transport","kcp","mode"])||"",p=KCP_PRESETS[mode];function gi(k){return yGet(y,["transport","kcp",k]);}return{mode:mode||"?",nodelay:p?p.nodelay:gi("nodelay"),interval:p?p.interval:gi("interval"),resend:p?p.resend:gi("resend"),nocongestion:p?p.nocongestion:gi("nocongestion"),wdelay:p?p.wdelay:gi("wdelay"),acknodelay:p?p.acknodelay:gi("acknodelay"),mtu:gi("mtu"),sndwnd:gi("sndwnd"),rcvwnd:gi("rcvwnd"),dshard:gi("dshard"),pshard:gi("pshard"),smuxbuf:gi("smuxbuf"),streambuf:gi("streambuf"),block:gi("block")};}
+// health: one verdict from daemon + posture + preflight + listeners +
+// targets + worst failing channel. Best-effort; missing sources read
+// "not loaded", never break the poll.
+function renderHealth(){var el=$("healthBody");if(!el)return;var d=lastStatus||{},L=[];
+L.push(d.running==null?"daemon: unknown (no poll yet)":("daemon: "+(d.running?"● running":"○ stopped")+" · uptime "+fmtDur(d.uptime_seconds)));
+var ex=lastPostureM&&lastPostureM.exposure?String(lastPostureM.exposure):"unknown";L.push("posture: "+ex);
+if(lastPreflight&&Array.isArray(lastPreflight.checks)){var p=0,f=0,w=0,ff="";lastPreflight.checks.forEach(function(c){var s=String(c.status||"");if(s==="pass")p++;else if(s==="fail"){f++;if(!ff)ff=c.label||c.id||"";}else w++;});L.push("preflight: "+p+" pass · "+f+" fail · "+w+" warn"+(ff?" · first fail: "+ff:""));}else L.push("preflight: not loaded");
+if(lastListeners){var rn=0,stopped=[];lastListeners.forEach(function(it){if(it&&typeof it==="object"&&typeof it.running==="boolean"){if(it.running)rn++;else if(stopped.length<3)stopped.push(it.id||it.name||"?");}});L.push("listeners: "+rn+"/"+lastListeners.length+" running"+(stopped.length?" · stopped: "+stopped.join(", "):""));}else L.push("listeners: not loaded");
+var hh=0,hd=0,hf=0;(tgtRows||[]).forEach(function(r){var c=tgtHealthClass(tgtHealth(r).rate,r.fail).t;if(c==="healthy")hh++;else if(c==="degraded")hd++;else if(c==="failing")hf++;});L.push("targets: "+hh+" healthy · "+hd+" degraded · "+hf+" failing · fill "+(tgtRows||[]).length+"/100");
+var chans=[["total","st"],["tcp","tcp"],["udp","udp"],["socks","socks"],["fwd tcp","ftcp"],["fwd udp","fudp"]],worst=null,worstR=0;chans.forEach(function(ch){var r=winRead(sfWins[ch[1]+"_fail"]);if(r>worstR){worstR=r;worst=ch[0];}});L.push(worst&&worstR>0.01?("worst channel: "+worst+" ("+fmtCountRate(worstR)+" fail)"):("channels: clean"));
+var bad=(lastPostureM&&lastPostureM.exposure&&(lastPostureM.exposure==="critical"||lastPostureM.exposure==="warn"))||hf>0||(worst&&worstR>0.5);
+L.unshift(bad?"health: ATTENTION":"health: ok");
+el.textContent=L.join("\n");}
+// config perspective: effective KCP (preset vs live) + buffer sizes +
+// live transport counters + save/drift state. Parses lastCfg only.
+function renderCfgSum(){var y=String(lastCfg||""),e=effectiveKCP();setT("cfgSum",(yGet(y,["role"])||"?")+" · kcp "+(e.mode||"?"));setT("cfgSub","mtu "+(e.mtu||"?")+" · snd "+(e.sndwnd||"?")+"/rcv "+(e.rcvwnd||"?")+" · fec "+(e.dshard||"0")+"/"+(e.pshard||"0")+" · smux "+(e.smuxbuf||"?")+"/"+(e.streambuf||"?")+" · "+(e.block||"?"));var d=lastStatus||{},k=d.kcp||{},tr=d.transport||{},now=Date.now();var rr=winRate(retxWin,+k.retransmits||0,now,0);var live="rtt "+fmtMs(k.rtt_ms!=null?k.rtt_ms:k.rtt)+" · rto "+fmtMs(k.rto_ms!=null?k.rto:k.rto)+" · cwnd "+(((+k.cwnd||0)>0)?fmtInt(k.cwnd):"—")+" · retx "+fmtInt(k.retransmits||0)+" ("+fmtCountRate(rr)+") · fec rec "+fmtInt(k.fec_recovered||k.fec_shards||0)+" · q "+(tr.snd_queue||0)+"/"+(tr.rcv_queue||0)+"/"+(tr.snd_buf||0);var st=[];try{if(String($("cfg").value)!==String(lastCfg))st.push("unsaved changes");}catch(x){}try{if($("cfgDrift")&&!$("cfgDrift").classList.contains("hide"))st.push("drift: disk changed");}catch(x){}if(cfgBackupsN!=null)st.push("backups "+cfgBackupsN);setT("cfgHealth",live+(st.length?" · "+st.join(" · "):""));}
+// quiet background refresh for the health panel: same endpoints as the
+// Setup/Targets tabs but without touching their notes; never breaks poll.
+function loadHealthQuiet(){api("api/safety/preflight",{cache:"no-store"}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(function(d){lastPreflight=d||null;try{renderChecks((d&&d.checks)||[]);}catch(e){}try{renderHealth();}catch(e){}}).catch(function(){});api("api/listeners",{cache:"no-store"}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(function(d){lastListeners=parseListeners(d);try{renderListeners(lastListeners);}catch(e){}try{renderHealth();}catch(e){}}).catch(function(){});api("api/config/backups",{cache:"no-store"}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(function(d){var l=Array.isArray(d)?d:(d.backups||d.files||d.items||[]);cfgBackupsN=l.length;try{renderCfgSum();}catch(e){}}).catch(function(){cfgBackupsN=null;});}
 function loadPosture(){return api("api/safety/posture",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){renderPosture(d||{});}).catch(function(){});}
-function loadRuntime(){return api("api/runtime",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){d=d||{};var g=d.goroutines;var heap=d.mem_heap_bytes!=null?d.mem_heap_bytes:d.mem_alloc_bytes;var sys=d.mem_sys_bytes;var gc=d.mem_gc_cycles;var gv=d.go_version||"";var os=d.goos||"",arch=d.goarch||"";var cpu=d.num_cpu;var el=$("rtDetailBody");if(el)el.textContent=fmtInt(g)+" \u00b7 heap "+fmtBytes(heap)+" / sys "+fmtBytes(sys)+" \u00b7 gc "+fmtInt(gc)+" \u00b7 "+gv+" "+os+"/"+arch+" \u00b7 cpu "+fmtInt(cpu);}).catch(function(){var el=$("rtDetailBody");if(el)el.textContent="unavailable \u2014 continuing";});}
+function loadRuntime(){return api("api/runtime",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){d=d||{};var g=d.goroutines;var heap=d.mem_heap_bytes!=null?d.mem_heap_bytes:d.mem_alloc_bytes;var sys=d.mem_sys_bytes;var gc=d.mem_gc_cycles;var gv=d.go_version||"";var os=d.goos||"",arch=d.goarch||"";var cpu=d.num_cpu;try{var now2=Date.now(),gcR=winRate(gcWin,+gc||0,now2,0),hd=0;if(heapPrev.t&&now2-heapPrev.t>0){hd=((+heap||0)-heapPrev.v)/((now2-heapPrev.t)/60000);}heapPrev={t:now2,v:+heap||0};gcRmin=" ("+fmtCountRate(gcR*60).replace(" /s","/min")+")";setT("rtGc","gc "+fmtInt(gc||0)+gcRmin+" · heap "+(hd<0?"-":"+")+fmtBytes(Math.abs(hd))+"/min");}catch(e){}var el=$("rtDetailBody");if(el)el.textContent=fmtInt(g)+" \u00b7 heap "+fmtBytes(heap)+" / sys "+fmtBytes(sys)+" \u00b7 gc "+fmtInt(gc)+" \u00b7 "+gv+" "+os+"/"+arch+" \u00b7 cpu "+fmtInt(cpu);}).catch(function(){var el=$("rtDetailBody");if(el)el.textContent="unavailable \u2014 continuing";});}
 function poll(){var s=++seq;if(!postureLoaded){postureLoaded=true;loadPosture();}if(document.hidden){setTimeout(poll,2000);return;}api("api/status",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(s!==seq)return;if(wasOk===false&&!document.hidden)toast("reconnected to daemon","ok");wasOk=true;markOk(true,d.running);tick(d);}).catch(function(e){if(s!==seq)return;if(wasOk!==false&&!document.hidden)toast("daemon unreachable — retrying…","err");wasOk=false;markOk(false,false,String((e&&e.message)||e));}).finally(function(){setTimeout(poll,2000);});}
 function control(action){
 notice("");var b={start:$("bStart"),stop:$("bStop"),restart:$("bRestart")}[action];if(b)b.disabled=true;
@@ -1057,7 +1091,7 @@ tr.appendChild(tdA);
 tb.appendChild(tr);
 });
 }
-function loadListeners(){lstNote("");return api("api/listeners",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listeners endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var list=parseListeners(d);renderListeners(list);if(!list.length)lstNote("no listeners reported");return list;}).catch(function(e){renderListeners([]);lstNote("listeners: "+e.message+" — continuing",true);return [];});}
+function loadListeners(){lstNote("");return api("api/listeners",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listeners endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var list=parseListeners(d);lastListeners=list;renderListeners(list);if(!list.length)lstNote("no listeners reported");try{renderHealth();}catch(e){}return list;}).catch(function(e){renderListeners([]);lstNote("listeners: "+e.message+" — continuing",true);return [];});}
 function listenerAction(id,action){lstNote(action+" "+id+"…");api("api/listeners/"+encodeURIComponent(id)+"/"+action,{method:"POST",cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listener control unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(){lstNote(action+" ok: "+id);loadListeners();}).catch(function(e){lstNote(action+" "+id+": "+e.message+" — continuing",true);});}
 $("bLstRefresh").onclick=function(){loadListeners();};
 function logLvlNote(m,warn){var e=$("logLvlNote");if(!e)return;e.textContent=m||"";e.className="note"+(warn?" warn":"");}
@@ -1071,7 +1105,7 @@ function copyTextFallback(t){try{var ta=document.createElement("textarea");ta.va
 function setupPill(st){st=String(st||"unknown");var s=document.createElement("span");s.textContent=st;s.className="pill mono "+(st==="pass"?"ok-t":st==="fail"?"bad-t":"");if(st==="warn")s.style.color="var(--amber)";if(st==="unknown")s.style.color="var(--dim)";return s;}
 function renderChecks(list){var tb=$("setupBody");if(!tb)return;while(tb.firstChild)tb.removeChild(tb.firstChild);list=list||[];$("setupEmpty").style.display=list.length?"none":"block";list.slice(0,50).forEach(function(c){var tr=document.createElement("tr");var tdN=document.createElement("td");tdN.textContent=c.label||c.id||"?";tdN.className="mono";tr.appendChild(tdN);var tdS=document.createElement("td");tdS.appendChild(setupPill(c.status));tr.appendChild(tdS);var tdD=document.createElement("td");tdD.textContent=c.detail||"";tdD.className="mono";tdD.style.whiteSpace="normal";tr.appendChild(tdD);var tdF=document.createElement("td");tdF.textContent=c.fix||"—";tdF.className="mono";tdF.style.whiteSpace="normal";tr.appendChild(tdF);tb.appendChild(tr);});}
 function setupNote(m,warn){var e=$("setupNote");if(!e)return;e.textContent=m||"";e.className="note"+(warn?" warn":"");}
-function loadPreflight(){setupNote("loading preflight…");return api("api/safety/preflight",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("preflight endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){d=d||{};renderChecks(d.checks||[]);setT("setupServerFix",(d.server_fix&&d.server_fix.length)?d.server_fix.join("\n"):"no server rules — firewall already satisfied");setT("setupClientFix",(d.client_fix&&d.client_fix.length)?d.client_fix.join("\n"):"no client rules for this role/config");var fw=d.firewall||{};if(fw.supported===false){setupNote("firewall unsupported on this OS — manual steps in README",true);}else{var n=(d.checks||[]).length;setupNote("role="+(d.role||"unknown")+" · "+n+" check(s)"+((!d.checks||!d.checks.length)?" — continuing":""));}return d;}).catch(function(e){renderChecks([]);setupNote("preflight: "+e.message+" — continuing",true);return null;});}
+function loadPreflight(){setupNote("loading preflight…");return api("api/safety/preflight",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("preflight endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){d=d||{};lastPreflight=d;renderChecks(d.checks||[]);try{renderHealth();}catch(e){}setT("setupServerFix",(d.server_fix&&d.server_fix.length)?d.server_fix.join("\n"):"no server rules — firewall already satisfied");setT("setupClientFix",(d.client_fix&&d.client_fix.length)?d.client_fix.join("\n"):"no client rules for this role/config");var fw=d.firewall||{};if(fw.supported===false){setupNote("firewall unsupported on this OS — manual steps in README",true);}else{var n=(d.checks||[]).length;setupNote("role="+(d.role||"unknown")+" · "+n+" check(s)"+((!d.checks||!d.checks.length)?" — continuing":""));}return d;}).catch(function(e){renderChecks([]);setupNote("preflight: "+e.message+" — continuing",true);return null;});}
 $("bSetupSrvCopy").onclick=function(){copyText($("setupServerFix").textContent);setupNote("server fix copied");};
 $("bSetupCliCopy").onclick=function(){copyText($("setupClientFix").textContent);setupNote("client fix copied");};
 // remote access (harden): token generator + SSH snippet. Token value is
