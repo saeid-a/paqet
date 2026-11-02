@@ -223,30 +223,61 @@ Enable it in `config.yaml`:
 admin:
   enabled: true
   listen: "127.0.0.1:9090"
+  # token: "change-me-min-16-chars"  # optional bearer for /api/*
+  # tls_cert: ""  # optional paths for https panel
+  # tls_key: ""
 ```
 
-Then open `http://127.0.0.1:9090`. The legacy `metrics:` section still works as a fallback.
+Then open `http://127.0.0.1:9090` (`https://` when `tls_cert`/`tls_key` are set). The legacy `metrics:` section still works as a fallback.
 
 What you get:
 
 - **Status**: role, uptime, throughput in/out (with 120s chart), packets, active conns/streams, success/failure table, version + config path.
 - **Connections**: live table with search filter.
+- **Targets**: SOCKS5/forward listeners and upstream targets.
+- **Diag**: ping/dump helpers plus runtime and network info (interfaces, Linux-only firewall check).
 - **Config**: view/edit raw YAML from the panel, validates before saving, `Save + Restart` to apply.
-- **Logs**: in-memory tail (1000 lines) with level filter and auto-refresh.
+- **Backups**: config history, keeps last 10 saves for rollback.
+- **Logs**: in-memory tail (1000 lines) with level filter and auto-refresh, plus live SSE stream.
 - **Control**: `Start` / `Stop` / `Restart` buttons. The panel stays up while the core is stopped, so you can fix config and restart without SSH.
 
 JSON API (same server):
 
 | Method | Path | Description |
 | :----- | :--- | :---------- |
-| `GET` | `/metrics` | legacy status snapshot JSON |
+| `GET` | `/metrics` | legacy status snapshot JSON (token-protected when `admin.token` is set) |
 | `GET` | `/api/status` | status + `running`, `config_path`, `build` |
 | `GET` / `PUT` | `/api/config` | raw YAML get/save (validates, `0600` file) |
+| `GET` / `POST` | `/api/config/backups` | list backups (`GET`) / save backup now (`POST {"action":"save"}` retention: 10) |
+| `POST` | `/api/config/restore` | restore backup (`{"file":"<basename>"}`) |
 | `POST` | `/api/control` | `{"action":"start"\|"stop"\|"restart"}` |
+| `POST` | `/api/core/drain` | drain active connections/streams |
 | `GET` | `/api/logs?tail=200&level=all` | in-memory logs |
+| `GET` | `/api/log` | log level get (`GET`) / set (`POST`/`PUT {"level":"info"}`) |
+| `GET` | `/api/logs/stream` | live logs via SSE (`text/event-stream`) |
 | `GET` | `/api/version` | version/build info |
+| `GET` | `/api/targets` | SOCKS5/forward listeners and targets |
+| `GET` | `/api/listeners` | bound listen addresses |
+| `GET` | `/api/runtime` | go runtime / process info |
+| `GET` | `/api/net/interfaces` | host network interfaces |
+| `GET` | `/api/net/firewall` | firewall/iptables check (Linux-only) |
+| `POST` | `/api/diag/ping` | connectivity probe (501 until wired to `paqet ping`) |
+| `POST` | `/api/diag/dump` | packet capture summary (501 until wired to `paqet dump`) |
 
-> Bind to `127.0.0.1` and use SSH port-forwarding for remote boxes. There is no auth — do not expose the panel to the internet.
+Auth: when `admin.token` is set (min 16 chars), every `/api/*` request (and `/metrics`) must send `Authorization: Bearer <token>`; the SSE stream also accepts `?token=` since EventSource cannot set headers. The UI prompts for the token and keeps it in `sessionStorage`. Without a token there is no auth.
+
+TLS: set `admin.tls_cert` + `admin.tls_key` (PEM paths) to serve the panel over HTTPS. Mixed HTTP/HTTPS on the same port is not supported — restart after changing.
+
+Live logs (SSE): `GET /api/logs/stream?level=all` returns `text/event-stream`. Reconnects automatically in the Logs tab.
+
+CSV export: status/targets tables support `?format=csv` (e.g., `/api/status?format=csv`, `/api/targets?format=csv`) for spreadsheet export.
+
+Backups: each successful `PUT /api/config` keeps a timestamped copy; `GET /api/config/backups` lists them, retention is 10 (oldest pruned automatically).
+
+Firewall check: `GET /api/net/firewall` inspects iptables/NOTRACK+RST-drop rules on Linux only; on macOS/Windows it returns `unsupported` — use the manual `iptables` steps in this README instead.
+
+> [!WARNING]
+> Bind to `127.0.0.1` and use SSH port-forwarding for remote boxes. Without `admin.token` + TLS there is no auth and no encryption — anyone with network access can read/edit config and stop the core. Never expose an unauthenticated panel to the internet.
 
 ## Command-Line Usage
 

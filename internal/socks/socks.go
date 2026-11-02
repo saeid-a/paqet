@@ -9,6 +9,7 @@ import (
 	"paqet/internal/client"
 	"paqet/internal/conf"
 	"paqet/internal/flog"
+	"paqet/internal/metrics"
 )
 
 type Server struct {
@@ -44,6 +45,9 @@ func (s *Server) serveTCP(ctx context.Context, listener net.Listener) {
 			case <-ctx.Done():
 				return
 			default:
+				metrics.IncFailure()
+				metrics.IncFailureTCP()
+				metrics.IncFailureSOCKS()
 				continue
 			}
 		}
@@ -59,11 +63,17 @@ func (s *Server) handleTCPConn(ctx context.Context, conn net.Conn) {
 	conn.SetDeadline(time.Now().Add(8 * time.Second))
 	if err := s.negotiate(conn); err != nil {
 		flog.Debugf("SOCKS5 negotiation with %s failed: %v", conn.RemoteAddr(), err)
+		metrics.IncFailure()
+		metrics.IncFailureTCP()
+		metrics.IncFailureSOCKS()
 		return
 	}
 	req, err := s.read(conn)
 	if err != nil {
 		flog.Debugf("SOCKS5 request from %s failed: %v", conn.RemoteAddr(), err)
+		metrics.IncFailure()
+		metrics.IncFailureTCP()
+		metrics.IncFailureSOCKS()
 		return
 	}
 	conn.SetDeadline(time.Time{})
@@ -77,6 +87,9 @@ func (s *Server) handleTCPConn(ctx context.Context, conn net.Conn) {
 		s.handleAssociate(ctx, conn, req)
 	default:
 		flog.Debugf("SOCKS5 unsupported command %d from %s", req.cmd, conn.RemoteAddr())
+		metrics.IncFailure()
+		metrics.IncFailureTCP()
+		metrics.IncFailureSOCKS()
 		s.write(conn, repCmdUnsupp)
 	}
 }

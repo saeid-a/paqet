@@ -38,11 +38,13 @@ func Listen(cfg *conf.KCP, netCfg conf.Network) (tnet.Listener, error) {
 func (l *Listener) Accept() (tnet.Conn, error) {
 	conn, err := l.listener.AcceptKCP()
 	if err != nil {
+		metrics.IncFailure()
 		return nil, fmt.Errorf("kcp: failed to accept connection: %w", err)
 	}
 	aplConf(conn, l.cfg)
 	sess, err := smux.Server(conn, smuxConf(l.cfg))
 	if err != nil {
+		metrics.IncFailure()
 		conn.Close()
 		return nil, fmt.Errorf("kcp: failed to create smux session: %w", err)
 	}

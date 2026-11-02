@@ -3,6 +3,7 @@ package metrics
 import (
 	"encoding/json"
 	"net/http"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -34,7 +35,32 @@ type Snapshot struct {
 	FailureFwdTCP     uint64         `json:"failure_forward_tcp"`
 	SuccessFwdUDP     uint64         `json:"success_forward_udp"`
 	FailureFwdUDP     uint64         `json:"failure_forward_udp"`
+	KCP               KCPStats       `json:"kcp"`
+	Runtime           RuntimeStats   `json:"runtime"`
+	Targets           []TargetStat   `json:"targets"`
 	Connections       []ConnSnapshot `json:"connections"`
+}
+
+type KCPStats struct {
+	RTTMs       int64  `json:"rtt_ms"`
+	RTOMs       int64  `json:"rto_ms"`
+	Cwnd        int64  `json:"cwnd"`
+	Retransmits uint64 `json:"retransmits"`
+	FECShards   int64  `json:"fec_shards"`
+}
+
+type RuntimeStats struct {
+	Goroutines    int    `json:"goroutines"`
+	MemAllocBytes uint64 `json:"mem_alloc_bytes"`
+	MemSysBytes   uint64 `json:"mem_sys_bytes"`
+}
+
+type TargetStat struct {
+	Target   string `json:"target"`
+	BytesIn  uint64 `json:"bytes_in"`
+	BytesOut uint64 `json:"bytes_out"`
+	Success  uint64 `json:"success"`
+	Failure  uint64 `json:"failure"`
 }
 
 type ConnSnapshot struct {
@@ -51,6 +77,7 @@ type ConnSnapshot struct {
 	BytesInPerSec  float64 `json:"bytes_in_per_sec"`
 	BytesOutPerSec float64 `json:"bytes_out_per_sec"`
 	ActiveStreams  int64   `json:"active_streams"`
+	RttMs          int64   `json:"rtt_ms,omitempty"`
 }
 
 var startTime = time.Now()
@@ -86,6 +113,7 @@ type connStats struct {
 	bytesIn       uint64
 	bytesOut      uint64
 	activeStreams int64
+	rttMs         int64
 }
 
 var connID uint64
@@ -178,6 +206,151 @@ func IncSuccessForwardUDP() {
 
 func IncFailureForwardUDP() {
 	atomic.AddUint64(&failureFwdUDP, 1)
+}
+
+// ---- KCP transport stats (stubs) ----
+// TODO: wire these to kcp-go session introspection (RTT/RTO/cwnd are not
+// currently exposed by the tnet/kcp wrapper); until then they report the
+// last values pushed via SetKCPStats/SetKCPQuality, defaulting to 0.
+
+var kcpRTTMs int64
+var kcpRTOMs int64
+var kcpCwnd int64
+var kcpRetransmits uint64
+var kcpFECShards int64
+
+func SetKCPStats(rtt, rto, cwnd int64) {
+	atomic.StoreInt64(&kcpRTTMs, rtt)
+	atomic.StoreInt64(&kcpRTOMs, rto)
+	atomic.StoreInt64(&kcpCwnd, cwnd)
+}
+
+func SetKCPQuality(retransmits uint64, fecShards int64) {
+	atomic.StoreUint64(&kcpRetransmits, retransmits)
+	atomic.StoreInt64(&kcpFECShards, fecShards)
+}
+
+func SetConnKCP(id uint64, rtt int64) {
+	connMu.RLock()
+	cs := conns[id]
+	connMu.RUnlock()
+	if cs == nil {
+		return
+	}
+	atomic.StoreInt64(&cs.rttMs, rtt)
+}
+
+// ---- Per-target accounting ----
+
+const maxTargetEntries = 100
+
+type targetCounters struct {
+	bytesIn  uint64
+	bytesOut uint64
+	success  uint64
+	failure  uint64
+	seq      uint64 // insertion order for LRU-ish eviction
+}
+
+var targetMu sync.RWMutex
+var targets = make(map[string]*targetCounters)
+var targetSeq uint64
+
+// IncTarget records one success/failure outcome (plus optional byte counts)
+// for a destination address. Hot path is cheap: a brief map lookup under
+// RLock plus atomic counter updates; the write lock is only taken when a
+// previously unseen target must be inserted.
+func IncTarget(target string, inBytes, outBytes uint64, success bool) {
+	if target == "" {
+		return
+	}
+	targetMu.RLock()
+	tc := targets[target]
+	targetMu.RUnlock()
+	if tc == nil {
+		targetMu.Lock()
+		tc = targets[target]
+		if tc == nil {
+			if len(targets) >= maxTargetEntries {
+				// Evict the oldest-inserted entry (LRU-ish, bounded scan).
+				oldest := ""
+				var oldestSeq uint64
+				first := true
+				for k, v := range targets {
+					s := atomic.LoadUint64(&v.seq)
+					if first || s < oldestSeq {
+						oldest, oldestSeq, first = k, s, false
+					}
+				}
+				if oldest != "" {
+					delete(targets, oldest)
+				}
+			}
+			targetSeq++
+			tc = &targetCounters{}
+			atomic.StoreUint64(&tc.seq, targetSeq)
+			targets[target] = tc
+		}
+		targetMu.Unlock()
+	}
+	if inBytes > 0 {
+		atomic.AddUint64(&tc.bytesIn, inBytes)
+	}
+	if outBytes > 0 {
+		atomic.AddUint64(&tc.bytesOut, outBytes)
+	}
+	if success {
+		atomic.AddUint64(&tc.success, 1)
+	} else {
+		atomic.AddUint64(&tc.failure, 1)
+	}
+}
+
+// TopTargets returns up to limit targets ordered by total bytes (desc).
+// It always returns a non-nil slice.
+func TopTargets(limit int) []TargetStat {
+	if limit <= 0 {
+		return []TargetStat{}
+	}
+	targetMu.RLock()
+	out := make([]TargetStat, 0, len(targets))
+	for tgt, tc := range targets {
+		out = append(out, TargetStat{
+			Target:   tgt,
+			BytesIn:  atomic.LoadUint64(&tc.bytesIn),
+			BytesOut: atomic.LoadUint64(&tc.bytesOut),
+			Success:  atomic.LoadUint64(&tc.success),
+			Failure:  atomic.LoadUint64(&tc.failure),
+		})
+	}
+	targetMu.RUnlock()
+	sort.Slice(out, func(i, j int) bool {
+		bi := out[i].BytesIn + out[i].BytesOut
+		bj := out[j].BytesIn + out[j].BytesOut
+		if bi != bj {
+			return bi > bj
+		}
+		if out[i].Success != out[j].Success {
+			return out[i].Success > out[j].Success
+		}
+		return out[i].Target < out[j].Target
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// RuntimeNow samples process runtime stats. Called per status scrape, not
+// on any packet hot path.
+func RuntimeNow() RuntimeStats {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return RuntimeStats{
+		Goroutines:    runtime.NumGoroutine(),
+		MemAllocBytes: m.Alloc,
+		MemSysBytes:   m.Sys,
+	}
 }
 
 func RegisterConnection(remoteAddr, localAddr string) uint64 {
@@ -286,6 +459,8 @@ func SnapshotNow() Snapshot {
 			}
 		}
 	}
+	connMu.Unlock()
+	connMu.RLock()
 	connSnaps := make([]ConnSnapshot, 0, len(conns))
 	for _, cs := range conns {
 		status := "active"
@@ -320,9 +495,10 @@ func SnapshotNow() Snapshot {
 			BytesInPerSec:  float64(atomic.LoadUint64(&cs.bytesIn)) / connUptime,
 			BytesOutPerSec: float64(atomic.LoadUint64(&cs.bytesOut)) / connUptime,
 			ActiveStreams:  atomic.LoadInt64(&cs.activeStreams),
+			RttMs:          atomic.LoadInt64(&cs.rttMs),
 		})
 	}
-	connMu.Unlock()
+	connMu.RUnlock()
 	sort.Slice(connSnaps, func(i, j int) bool {
 		return connSnaps[i].ID < connSnaps[j].ID
 	})
@@ -350,7 +526,16 @@ func SnapshotNow() Snapshot {
 		FailureFwdTCP:     atomic.LoadUint64(&failureFwdTCP),
 		SuccessFwdUDP:     atomic.LoadUint64(&successFwdUDP),
 		FailureFwdUDP:     atomic.LoadUint64(&failureFwdUDP),
-		Connections:       connSnaps,
+		KCP: KCPStats{
+			RTTMs:       atomic.LoadInt64(&kcpRTTMs),
+			RTOMs:       atomic.LoadInt64(&kcpRTOMs),
+			Cwnd:        atomic.LoadInt64(&kcpCwnd),
+			Retransmits: atomic.LoadUint64(&kcpRetransmits),
+			FECShards:   atomic.LoadInt64(&kcpFECShards),
+		},
+		Runtime:     RuntimeNow(),
+		Targets:     TopTargets(maxTargetEntries),
+		Connections: connSnaps,
 	}
 }
 

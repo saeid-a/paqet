@@ -19,6 +19,7 @@ func Dial(addr *net.UDPAddr, cfg *conf.KCP, netCfg conf.Network) (tnet.Conn, err
 	nCfg := netCfg
 	packetConn, err := socket.New(&nCfg)
 	if err != nil {
+		metrics.IncFailure()
 		return nil, fmt.Errorf("kcp: failed to create packetconn: %w", err)
 	}
 
@@ -28,6 +29,7 @@ func Dial(addr *net.UDPAddr, cfg *conf.KCP, netCfg conf.Network) (tnet.Conn, err
 	// enabled; pre-existing configs without the key are unaffected.
 	if netCfg.TCP.HandshakeEnabled() {
 		if err := packetConn.TriggerHandshake(addr); err != nil {
+			metrics.IncFailure()
 			packetConn.Close()
 			return nil, fmt.Errorf("kcp: failed to trigger handshake: %w", err)
 		}
@@ -38,10 +40,12 @@ func Dial(addr *net.UDPAddr, cfg *conf.KCP, netCfg conf.Network) (tnet.Conn, err
 
 	conn, err := kcp.NewConn(addr.String(), cfg.Block, cfg.Dshard, cfg.Pshard, packetConn)
 	if err != nil {
+		metrics.IncFailure()
 		packetConn.Close()
 		return nil, fmt.Errorf("kcp: failed to dial connection: %w", err)
 	}
 	if conn == nil {
+		metrics.IncFailure()
 		packetConn.Close()
 		return nil, fmt.Errorf("connection attempt failed: nil KCP session")
 	}
@@ -51,6 +55,7 @@ func Dial(addr *net.UDPAddr, cfg *conf.KCP, netCfg conf.Network) (tnet.Conn, err
 
 	sess, err := smux.Client(conn, smuxConf(cfg))
 	if err != nil {
+		metrics.IncFailure()
 		conn.Close()
 		packetConn.Close()
 		return nil, fmt.Errorf("kcp: failed to create smux session: %w", err)

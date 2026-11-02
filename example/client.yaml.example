@@ -9,9 +9,14 @@ log:
 # Control panel (web UI) + status API.
 # Open http://127.0.0.1:9090 for overview, connections, config editor, logs,
 # start/stop/restart and JSON at /api/status, /metrics.
+# Tabs: Targets (SOCKS/forward listeners), Diag (ping/dump, runtime/net info),
+# Backups (config history, keeps last 10).
 admin:
   enabled: true
   listen: "127.0.0.1:9090"
+  # token: "change-me-min-16-chars"  # optional bearer for /api/*
+  # tls_cert: ""  # optional paths for https panel
+  # tls_key: ""
 
 metrics:
   enabled: false

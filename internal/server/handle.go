@@ -13,7 +13,10 @@ func (s *Server) handleConn(ctx context.Context, conn tnet.Conn) {
 	for {
 		strm, err := conn.AcceptStrm()
 		if err != nil {
-			flog.Errorf("failed to accept stream on %s: %v", conn.RemoteAddr(), err)
+			if ctx.Err() == nil {
+				flog.Errorf("failed to accept stream on %s: %v", conn.RemoteAddr(), err)
+				metrics.IncFailure()
+			}
 			return
 		}
 		go func() {

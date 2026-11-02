@@ -31,16 +31,28 @@ func (f *Forward) serveUDP(ctx context.Context, conn *net.UDPConn) {
 			case <-ctx.Done():
 				return
 			default:
+				metrics.IncFailure()
+				metrics.IncFailureForwardUDP()
+				metrics.IncFailureUDP()
+				metrics.IncTarget(f.targetAddr, 0, 0, false)
 				continue
 			}
 		}
 
 		if n > buffer.UDPSize {
 			flog.Debugf("UDP %s: datagram too large, at least %d bytes (limit %d)", cAddr, n, buffer.UDPSize)
+			metrics.IncFailure()
+			metrics.IncFailureForwardUDP()
+			metrics.IncFailureUDP()
+			metrics.IncTarget(f.targetAddr, 0, 0, false)
 			continue
 		}
 		s := f.openUDPSess(ctx, conn, cAddr)
 		if len(s.ch) == cap(s.ch) {
+			metrics.IncFailure()
+			metrics.IncFailureForwardUDP()
+			metrics.IncFailureUDP()
+			metrics.IncTarget(f.targetAddr, 0, 0, false)
 			continue
 		}
 		d := make([]byte, n)
@@ -78,6 +90,7 @@ func (f *Forward) udpToStrm(ctx context.Context, conn *net.UDPConn, cAddr netip.
 		metrics.IncFailure()
 		metrics.IncFailureForwardUDP()
 		metrics.IncFailureUDP()
+		metrics.IncTarget(f.targetAddr, 0, 0, false)
 		f.closeUDPSess(cAddr, sess)
 		return
 	}
@@ -104,12 +117,14 @@ func (f *Forward) udpToStrm(ctx context.Context, conn *net.UDPConn, cAddr netip.
 				metrics.IncFailure()
 				metrics.IncFailureForwardUDP()
 				metrics.IncFailureUDP()
+				metrics.IncTarget(f.targetAddr, 0, 0, false)
 				return
 			}
 			f.client.Touch(sess.key)
 			metrics.IncSuccess()
 			metrics.IncSuccessForwardUDP()
 			metrics.IncSuccessUDP()
+			metrics.IncTarget(f.targetAddr, 0, uint64(len(buf)), true)
 		}
 	}
 }
@@ -122,10 +137,23 @@ func (f *Forward) strmToUDP(ctx context.Context, strm tnet.Strm, conn *net.UDPCo
 	for {
 		n, err := strm.Read(buf)
 		if err != nil {
+			// Graceful shutdown (SIGTERM/parent cancel closes strm via
+			// AfterFunc) is not a failure — same guard as socks/associate.
+			if ctx.Err() != nil {
+				return
+			}
+			// If udpToStrm already failed and closed the session, this Read
+			// error is just teardown (strm closed) — don't double-count.
+			select {
+			case <-sess.done:
+				return
+			default:
+			}
 			flog.Errorf("UDP stream %d read failed for %s -> %s: %v", strm.SID(), cAddr, f.targetAddr, err)
 			metrics.IncFailure()
 			metrics.IncFailureForwardUDP()
 			metrics.IncFailureUDP()
+			metrics.IncTarget(f.targetAddr, 0, 0, false)
 			return
 		}
 		f.client.Touch(sess.key)
@@ -135,8 +163,13 @@ func (f *Forward) strmToUDP(ctx context.Context, strm tnet.Strm, conn *net.UDPCo
 			metrics.IncFailure()
 			metrics.IncFailureForwardUDP()
 			metrics.IncFailureUDP()
+			metrics.IncTarget(f.targetAddr, uint64(n), 0, false)
 			return
 		}
+		metrics.IncSuccess()
+		metrics.IncSuccessForwardUDP()
+		metrics.IncSuccessUDP()
+		metrics.IncTarget(f.targetAddr, uint64(n), 0, true)
 	}
 }
 

@@ -20,7 +20,7 @@ type Conf struct {
 	Server    Server    `yaml:"server"`
 	Transport Transport `yaml:"transport"`
 	Metrics   Metrics   `yaml:"metrics"`
-	Admin     Metrics   `yaml:"admin"`
+	Admin     Admin     `yaml:"admin"`
 }
 
 func LoadFromFile(path string) (*Conf, error) {
@@ -54,12 +54,15 @@ func LoadFromBytes(data []byte) (*Conf, error) {
 
 // EffectiveAdmin returns the admin/UI listen config.
 // Prefers `admin:` section, falls back to legacy `metrics:` for compat.
-func (c *Conf) EffectiveAdmin() Metrics {
+func (c *Conf) EffectiveAdmin() Admin {
 	if c.Admin.Enabled {
 		return c.Admin
 	}
 	if c.Metrics.Enabled {
-		return c.Metrics
+		return Admin{
+			Enabled: true,
+			Listen_: c.Metrics.Listen_,
+		}
 	}
 	return c.Admin
 }

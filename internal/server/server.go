@@ -45,6 +45,7 @@ func (s *Server) listen(ctx context.Context, listener tnet.Listener) {
 			case <-ctx.Done():
 				return
 			default:
+				metrics.IncFailure()
 				continue
 			}
 		}

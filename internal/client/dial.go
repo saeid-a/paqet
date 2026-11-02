@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"paqet/internal/flog"
+	"paqet/internal/metrics"
 	"paqet/internal/tnet"
 )
 
@@ -38,11 +39,13 @@ func (c *Client) newStrm(ctx context.Context) (tnet.Strm, error) {
 		conn, err := c.newConn()
 		if err != nil {
 			flog.Debugf("failed to open conn, retrying: %v", err)
+			metrics.IncFailure()
 			continue
 		}
 		strm, err := conn.OpenStrm()
 		if err != nil {
 			flog.Debugf("failed to open stream, retrying: %v", err)
+			metrics.IncFailure()
 			continue
 		}
 		return strm, nil

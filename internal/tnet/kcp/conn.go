@@ -27,6 +27,7 @@ type Conn struct {
 func (c *Conn) OpenStrm() (tnet.Strm, error) {
 	strm, err := c.Session.OpenStream()
 	if err != nil {
+		metrics.IncFailure()
 		return nil, err
 	}
 	return newStrm(strm, c.metricsID), nil
@@ -35,6 +36,7 @@ func (c *Conn) OpenStrm() (tnet.Strm, error) {
 func (c *Conn) AcceptStrm() (tnet.Strm, error) {
 	strm, err := c.Session.AcceptStream()
 	if err != nil {
+		metrics.IncFailure()
 		return nil, err
 	}
 	return newStrm(strm, c.metricsID), nil
