@@ -154,3 +154,11 @@ func TestDashboardHasTransportPressure(t *testing.T) {
         if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
     }
 }
+
+func TestDashboardHasConnHistory(t *testing.T) {
+    html, _ := os.ReadFile("dashboard.html")
+    s := string(html)
+    for _, want := range []string{`id="modalHist"`, "trackConnHist", "connHist", "closedAt", "textContent"} {
+        if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+    }
+}

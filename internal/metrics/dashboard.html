@@ -354,7 +354,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="panel"><h2>Remote access</h2><div class="row"><button id="bGenToken">Generate token</button><button id="bSshCopy" class="sub">Copy SSH cmd</button></div><pre id="sshSnippet" class="mono">…</pre><div class="note">paste token into admin.token, save + restart; never share in chat</div></div>
 </section>
 
-<div id="modal" class="hide"><div id="modalBox"><div id="modalHead"><b>Connection detail</b><span style="flex:1"></span><button id="modalX" class="sub">Close</button></div><div id="modalBody" class="mono"></div></div></div>
+<div id="modal" class="hide"><div id="modalBox"><div id="modalHead"><b>Connection detail</b><span style="flex:1"></span><button id="modalX" class="sub">Close</button></div><div id="modalHist" class="mono" style="padding:8px 12px;border-bottom:1px solid var(--line);white-space:pre-wrap"></div><div id="modalBody" class="mono"></div></div></div>
 
 <footer class="mono" id="ts"></footer>
 
@@ -393,7 +393,10 @@ tabs.forEach(function(b){b.onclick=function(){showTab(b.dataset.t);};});
 window.addEventListener("hashchange",function(){var h=tabFromHash();if(h)showTab(h);});
 document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=7)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
 // modal drawer
-function openModal(c){setT("modalBody",JSON.stringify(c,null,2));$("modal").classList.remove("hide");}
+var connHist={};
+function trackConnHist(now){now=+now||Date.now();var seen={};(connCache||[]).forEach(function(c){var k=connId(c);seen[k]=1;var h=connHist[k]||(connHist[k]={rtt:[],rin:[],rout:[]});var r=connRtt(c);if(r!=null)h.rtt.push(r);h.rin.push(+c._rin||0);h.rout.push(+c._rout||0);if(h.rtt.length>MAX)h.rtt.shift();if(h.rin.length>MAX)h.rin.shift();if(h.rout.length>MAX)h.rout.shift();});Object.keys(connHist).forEach(function(k){if(!seen[k])delete connHist[k];});}
+function modalHistText(c){c=c||{};var k=connId(c),h=connHist[k]||{rtt:[],rin:[],rout:[]};var rs=(h.rtt||[]).slice(-20),mn=null,mx=null;for(var i=0;i<rs.length;i++){if(mn==null||rs[i]<mn)mn=rs[i];if(mx==null||rs[i]>mx)mx=rs[i];}var last=rs.length?rs[rs.length-1]:connRtt(c);var closed=c.closedAt?"closed":"active";var lines=["status: "+closed+" · id "+c.id+" · "+(c.remote_addr||"?")+" -> "+(c.local_addr||"?")];lines.push("lifetime in "+fmtBytes(c.bytes_in)+" / out "+fmtBytes(c.bytes_out)+" · uptime "+fmtDur(c.uptime_seconds)+" · streams "+c.active_streams);lines.push("rtt last "+(last==null?"—":fmtMs(last))+" · min "+(mn==null?"—":fmtMs(mn))+" · max "+(mx==null?"—":fmtMs(mx))+" ("+rs.length+" samples)");lines.push("rin last "+fmtRate((h.rin||[]).length?(h.rin[h.rin.length-1]||0):(c._rin||0))+" · rout last "+fmtRate((h.rout||[]).length?(h.rout[h.rout.length-1]||0):(c._rout||0)));return lines.join("\n");}
+function openModal(c){setT("modalBody",JSON.stringify(c,null,2));var el=$("modalHist");if(el)el.textContent=modalHistText(c);$("modal").classList.remove("hide");}
 $("modalX").onclick=function(){$("modal").classList.add("hide");};
 $("modal").addEventListener("click",function(e){if(e.target===this)this.classList.add("hide");});
 function fmtCountRate(n){n=+n||0;return n.toFixed(2)+" /s";}
@@ -411,7 +414,7 @@ function connRtt(c){var v=(c.rtt_ms!=null?c.rtt_ms:(c.RttMs!=null?c.RttMs:(c.rtt
 function connIdleSec(c,now){var s=c.last_seen||c.lastSeen||c.LastSeen;if(!s)return null;var t=Date.parse(s);if(isNaN(t))return null;var d=((+now||Date.now())-t)/1000;if(!(d>=0))return null;return d;}
 function connRates(now){var seen={};(connCache||[]).forEach(function(c){var k=connId(c);seen[k]=1;var w=connWins[k]||(connWins[k]={in:[],out:[]});c._rin=winRate(w.in,c.bytes_in,now,0);c._rout=winRate(w.out,c.bytes_out,now,0);c._rate=(c._rin||0)+(c._rout||0);});Object.keys(connWins).forEach(function(k){if(!seen[k])delete connWins[k];});}
 function connVal(c,k){switch(k){case "id":return String(c.id==null?"":c.id);case "remote":return String(c.remote_addr||"").toLowerCase();case "local":return String(c.local_addr||"").toLowerCase();case "status":return String(c.status||"").toLowerCase();case "uptime":return +c.uptime_seconds||0;case "idle":var _id=connIdleSec(c,Date.now());return _id==null?-1:_id;case "in":return +c.bytes_in||0;case "out":return +c.bytes_out||0;case "rin":return c._rin||0;case "rout":return c._rout||0;case "tot":return c._rate||0;case "rtt":var _r=connRtt(c);return _r==null?-1:_r;case "streams":return +c.active_streams||0;}return 0;}
-function renderConns(list){list=list||[];var now=Date.now();trackGone(list,now);connCache=list;connRates(now);applyFilter();}
+function renderConns(list){list=list||[];var now=Date.now();trackGone(list,now);connCache=list;connRates(now);try{trackConnHist(now);}catch(e){}applyFilter();}
 // lifecycle: vanished ids are kept as dimmed tombstones (status "closed")
 // so a disconnect stays visible instead of silently dropping off the table.
 // Tombstones never feed rates/top-talker; reappearing ids clear them.
