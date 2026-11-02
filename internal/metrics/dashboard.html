@@ -210,6 +210,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <button class="sub" data-ct="form">Form</button>
 <button id="bCfgLoad">Reload from disk</button>
 <button id="bCfgDiff" class="sub" title="show unified diff of unsaved changes vs last loaded/saved config" aria-expanded="false">Preview diff</button>
+<button id="bCfgValidate" class="sub" title="validate current YAML without saving">Validate</button>
 <button id="bCfgSave" class="primary">Save</button>
 <button id="bCfgSaveRestart">Save + Restart</button>
 </div>
@@ -304,6 +305,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <input type="text" id="logSearch" placeholder="regex filter, e.g. error|timeout">
 <label class="chk"><input type="checkbox" id="logAuto" checked> auto-refresh</label>
 <label class="chk"><input type="checkbox" id="logPause"> pause</label>
+<label class="chk"><input type="checkbox" id="logAuditOnly"> AUDIT only</label>
 <button id="bLogRefresh">Refresh</button>
 <button id="bLogDl">Download</button>
 <select id="logSetLevel" title="server log level (applies immediately)"><option value="">level…</option><option value="none">none</option><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option><option value="fatal">fatal</option></select>
@@ -593,43 +595,52 @@ ul.appendChild(li);
 }
 if(list.length>20){var more=document.createElement("li");more.textContent="\u2026 +"+(list.length-20)+" more";ul.appendChild(more);}
 }
-function renderCfgDiff(){
+function showConfigDiff(oldYaml,newYaml){
 var box=$("cfgDiff"),stats=$("cfgDiffStats");if(!box)return;
 while(box.firstChild)box.removeChild(box.firstChild);
-var oldL=splitCfgLines(lastCfg),newL=splitCfgLines($("cfg").value);
-var ops=diffOps(oldL,newL),adds=0,dels=0,changed=[];
-for(var i=0;i<ops.length;i++){if(ops[i].t==="+"){adds++;changed.push(i);}else if(ops[i].t==="-"){dels++;changed.push(i);}}
-if(!changed.length){
+var oldL=splitCfgLines(oldYaml),newL=splitCfgLines(newYaml);
+var ops=diffOps(oldL,newL),adds=0,dels=0,n=0;
+for(var i=0;i<ops.length;i++){if(ops[i].t==="+")adds++;else if(ops[i].t==="-")dels++;}
+if(!adds&&!dels){
 if(stats)stats.textContent="no changes";
 var none=document.createElement("div");none.className="dl none";none.textContent="no changes \u2014 working copy matches last loaded/saved config";box.appendChild(none);
 return;
 }
-var CTX=3,wins=[];
-for(var c=0;c<changed.length;c++){var s=Math.max(0,changed[c]-CTX),e=Math.min(ops.length-1,changed[c]+CTX);if(wins.length&&s<=wins[wins.length-1][1]+1){if(e>wins[wins.length-1][1])wins[wins.length-1][1]=e;}else wins.push([s,e]);}
-if(stats)stats.textContent="+"+adds+" \u2212"+dels+" \u00b7 "+ops.length+" lines \u00b7 "+wins.length+" hunk"+(wins.length===1?"":"s");
-var oldNo=1,newNo=1,idx=0;
-for(var w=0;w<wins.length;w++){
-var a=wins[w][0],b=wins[w][1];
-while(idx<a){if(ops[idx].t===" ")oldNo++;else if(ops[idx].t==="-")oldNo++;else newNo++;idx++;}
-var h=document.createElement("div");h.className="dl hunk";h.textContent="@@-"+oldNo+","+(b-a+1)+" +"+newNo+","+(b-a+1)+" @@";box.appendChild(h);
-for(var k=a;k<=b;k++){
+if(stats)stats.textContent="+"+adds+" \u2212"+dels+" \u00b7 "+ops.length+" lines";
+for(var k=0;k<ops.length;k++){
+if(ops[k].t===" ")continue;
+if(n>=200){var more=document.createElement("div");more.className="dl none";more.textContent="\u2026 truncated at 200 lines";box.appendChild(more);break;}
 var d=document.createElement("div"),sgn=document.createElement("span"),txt=document.createElement("span");
 sgn.className="sgn";sgn.textContent=ops[k].t;d.appendChild(sgn);txt.textContent=ops[k].s;d.appendChild(txt);
-d.className="dl "+(ops[k].t==="+"?"add":ops[k].t==="-"?"del":"ctx");
+d.className="dl "+(ops[k].t==="+"?"add":"del");
 box.appendChild(d);
-if(ops[k].t===" ") {oldNo++;newNo++;} else if(ops[k].t==="-") oldNo++; else newNo++;
-idx++;
+n++;
 }
 }
-}
+function renderCfgDiff(){showConfigDiff(lastCfg,$("cfg").value);}
 function cfgDiffVisible(){var w=$("cfgDiffWrap");return !!(w&&!w.classList.contains("hide"));}
 function refreshCfgDiff(){if(cfgDiffVisible())renderCfgDiff();}
+function validateBeforeSave(){
+var y=$("cfg").value;
+cfgMsg("validating…",true);
+return api("api/config/validate",{method:"POST",body:JSON.stringify({yaml:y})}).then(function(r){return r.text().then(function(t){var j=null;try{j=JSON.parse(t);}catch(e){}return {ok:r.ok,st:r.status,j:j,raw:t};});}).then(function(o){
+if(o.ok){cfgMsg("valid",true);renderCfgErrs([]);return true;}
+var errs=(o.j&&(o.j.errors||o.j.error))||o.raw||("http "+o.st);
+var list=Array.isArray(errs)?errs:parseCfgErrs(String(errs));
+cfgMsg(list.length?list.join("\n"):("validation failed (http "+o.st+")"),false);
+renderCfgErrs(list);
+return false;}).catch(function(e){cfgMsg("validate failed: "+e.message,false);return false;});
+}
 function saveCfg(restart){
+validateBeforeSave().then(function(valid){
+if(!valid){refreshCfgDiff();return;}
 cfgMsg("saving…",true);renderCfgErrs([]);
 api("api/config",{method:"PUT",body:JSON.stringify({yaml:$("cfg").value})}).then(function(r){return r.text().then(function(t){var j=null;try{j=JSON.parse(t);}catch(e){}return {ok:r.ok,st:r.status,j:j,raw:t};});}).then(function(o){
 if(o.ok){cfgMsg("saved — restart to apply",true);lastCfg=$("cfg").value;renderCfgErrs([]);refreshCfgDiff();if(restart)control("restart");}
 else{var msg=((o.j&&o.j.error)||o.raw||("http "+o.st));var pre=/^\s*validation failed/i.test(msg)?"":"validation failed: ";cfgMsg(pre+msg,false);renderCfgErrs(parseCfgErrs(msg));refreshCfgDiff();}}).catch(function(e){cfgMsg("save failed: "+e.message,false);});
+});
 }
+$("bCfgValidate").onclick=function(){validateBeforeSave();};
 $("bCfgLoad").onclick=function(){loadCfg(true);};$("bCfgSave").onclick=function(){saveCfg(false);};$("bCfgSaveRestart").onclick=function(){saveCfg(true);};
 $("bCfgDiff").onclick=function(){try{if(!$("c-form").classList.contains("hide")){if(applyFormToYaml()==null)return;}}catch(e){}var w=$("cfgDiffWrap");if(!w)return;var show=w.classList.contains("hide");w.classList.toggle("hide",!show);try{$("bCfgDiff").setAttribute("aria-expanded",show?"true":"false");}catch(e){}if(show)renderCfgDiff();};
 $("bCfgDiffHide").onclick=function(){var w=$("cfgDiffWrap");if(w)w.classList.add("hide");try{$("bCfgDiff").setAttribute("aria-expanded","false");}catch(e){}};
@@ -881,7 +892,7 @@ $("bBackupSave").onclick=function(){api("api/config/backups",{method:"POST",body
 $("bBackupRestore").onclick=function(){var n=$("fBackups").value;if(!n){formNote("no backup selected",true);return;}api("api/config/restore",{method:"POST",body:JSON.stringify({file:n})}).then(function(r){if(r.status===404||r.status===501)throw new Error("restore endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(){formNote("restore requested: "+n);loadCfg(true);}).catch(function(e){formNote("restore: "+e.message+" — continuing",true);});};
 // logs: regex filter + pause + download + SSE w/ polling fallback
 function logLine(e){return (e.time||"")+" ["+(e.level||"")+"] "+(e.message||e.msg||"");}
-function logPass(s){var p=($("logSearch").value||"");if(!p)return true;try{return new RegExp(p,"i").test(s);}catch(e){return s.toLowerCase().indexOf(p.toLowerCase())>=0;}}
+function logPass(s){try{var a=$("logAuditOnly");if(a&&a.checked&&String(s).indexOf("AUDIT")<0)return false;}catch(e){}var p=($("logSearch").value||"");if(!p)return true;try{return new RegExp(p,"i").test(s);}catch(e){return s.toLowerCase().indexOf(p.toLowerCase())>=0;}}
 function renderLogs(entries){
 logCache=entries||[];
 if($("logPause").checked)return;
@@ -898,6 +909,7 @@ api("api/logs?tail="+encodeURIComponent(tail)+"&level="+encodeURIComponent(lv),{
 }
 $("bLogRefresh").onclick=pollLogs;
 $("logSearch").addEventListener("input",function(){renderLogs(logCache);});
+try{$("logAuditOnly").addEventListener("change",function(){renderLogs(logCache);});}catch(e){}
 setTimeout(function logLoop(){if(!document.hidden)pollLogs();setTimeout(logLoop,2500);},2500);
 $("bLogDl").onclick=function(){var out=[];for(var i=0;i<logCache.length;i++){var s=logLine(logCache[i]);if(logPass(s))out.push(s);}var b=new Blob([out.join("\n")+"\n"],{type:"text/plain"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="paqet-logs.txt";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);};
 function sseInit(){

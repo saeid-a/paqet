@@ -240,6 +240,7 @@ What you get:
 - **Config**: view/edit raw YAML from the panel, validates before saving, `Save + Restart` to apply.
 - **Backups**: config history, keeps last 10 saves for rollback.
 - **Logs**: in-memory tail (1000 lines) with level filter and auto-refresh, plus live SSE stream.
+- **Setup**: preflight checklist with copy-paste firewall fixes plus security posture.
 - **Control**: `Start` / `Stop` / `Restart` buttons. The panel stays up while the core is stopped, so you can fix config and restart without SSH.
 
 JSON API (same server):
@@ -262,6 +263,9 @@ JSON API (same server):
 | `GET` | `/api/runtime` | go runtime / process info |
 | `GET` | `/api/net/interfaces` | host network interfaces |
 | `GET` | `/api/net/firewall` | firewall/iptables check (Linux-only) |
+| `GET` | `/api/safety/posture` | security posture (exposure, bind, token/TLS) |
+| `GET` | `/api/safety/preflight` | launch-readiness checks plus firewall fix commands |
+| `POST` | `/api/config/validate` | dry-run config validation without writing (422 on error) |
 | `POST` | `/api/diag/ping` | connectivity probe (501 until wired to `paqet ping`) |
 | `POST` | `/api/diag/dump` | packet capture summary (501 until wired to `paqet dump`) |
 

@@ -36,3 +36,11 @@ func TestDashboardHasSetupTab(t *testing.T) {
 		if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
 	}
 }
+
+func TestDashboardHasConfigSafety(t *testing.T) {
+    html, _ := os.ReadFile("dashboard.html")
+    s := string(html)
+    for _, want := range []string{"api/config/validate", `id="cfgDiff"`, `id="bCfgValidate"`, "AUDIT"} {
+        if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+    }
+}
