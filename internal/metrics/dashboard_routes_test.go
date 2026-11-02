@@ -179,4 +179,6 @@ func TestDashboardHasProbeLab(t *testing.T) {
         if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
     }
     if strings.Contains(s, "innerHTML") { t.Fatal("probe path must not use innerHTML (XSS)") }
+    if !strings.Contains(s, `kind!=="speedtest"`) { t.Fatal("runProbe must skip host/port gate for speedtest (no target param)") }
+    if !strings.Contains(s, "observed") { t.Fatal("probe lab must label speedtest as observed traffic (idle tunnel reads ~0)") }
 }

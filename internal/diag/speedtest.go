@@ -62,6 +62,15 @@ type SpeedtestResult struct {
 	KCPDelta    map[string]uint64 `json:"kcp_delta"`
 }
 
+// subOrZero returns a-b, clamped to 0 when counters reset (b > a) so a
+// daemon restart mid-window reports nothing instead of ~2⁶⁴ bytes.
+func subOrZero(a, b uint64) uint64 {
+	if a < b {
+		return 0
+	}
+	return a - b
+}
+
 // Sentinel speedtest failures.
 var (
 	ErrBusy     = fmt.Errorf("speedtest already running")
@@ -123,7 +132,7 @@ func (m *SpeedtestManager) Run(ctx context.Context, durationSec int, mode string
 		return SpeedtestResult{}, err
 	}
 	in1, out1, retx1, lost1, fec1 := m.snapshot()
-	up, down := out1-out0, in1-in0
+	up, down := subOrZero(out1, out0), subOrZero(in1, in0)
 	counted := up + down
 	switch mode {
 	case speedtestUp:
@@ -138,9 +147,9 @@ func (m *SpeedtestManager) Run(ctx context.Context, durationSec int, mode string
 		BytesDown:   down,
 		GoodputMbps: float64(counted*8) / 1e6 / float64(durationSec),
 		KCPDelta: map[string]uint64{
-			"retransmits":   retx1 - retx0,
-			"lost_segs":     lost1 - lost0,
-			"fec_recovered": fec1 - fec0,
+			"retransmits":   subOrZero(retx1, retx0),
+			"lost_segs":     subOrZero(lost1, lost0),
+			"fec_recovered": subOrZero(fec1, fec0),
 		},
 	}, nil
 }

@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -36,6 +37,16 @@ func clampProbeSec(v, def, max int) int {
 		return max
 	}
 	return v
+}
+
+// writeProbeJSONError encodes a machine-readable probe error: the
+// dashboard parses 409/429 bodies as JSON, so http.Error's plain text
+// would surface as a parse error instead of the real message.
+func writeProbeJSONError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 // tryAcquireProbe says whether a probe slot was available.
@@ -91,7 +102,7 @@ func diagDialHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !tryAcquireProbe() {
 		w.Header().Set("Retry-After", "5")
-		http.Error(w, "too many probes", http.StatusTooManyRequests)
+		writeProbeJSONError(w, http.StatusTooManyRequests, "too many probes")
 		return
 	}
 	defer releaseProbe()
@@ -152,7 +163,7 @@ func diagUDPHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !tryAcquireProbe() {
 		w.Header().Set("Retry-After", "5")
-		http.Error(w, "too many probes", http.StatusTooManyRequests)
+		writeProbeJSONError(w, http.StatusTooManyRequests, "too many probes")
 		return
 	}
 	defer releaseProbe()
@@ -295,6 +306,16 @@ var speedtestMgr = diag.NewSpeedtestManager(func() (uint64, uint64, uint64, uint
 	return snap.BytesIn, snap.BytesOut, snap.KCP.Retransmits, snap.KCP.LostSegs, snap.KCP.FECRecovered
 })
 
+// speedtestHTTPStatus maps a Run failure to its HTTP status: 409 for the
+// two expected contention/idle states, 502 for anything else (a cancelled
+// run or internal failure is not a conflict worth retrying blindly).
+func speedtestHTTPStatus(err error) int {
+	if errors.Is(err, diag.ErrBusy) || errors.Is(err, diag.ErrNoTunnel) {
+		return http.StatusConflict
+	}
+	return http.StatusBadGateway
+}
+
 // diagSpeedtestHandler serves POST /api/diag/speedtest.
 func diagSpeedtestHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -328,29 +349,35 @@ func diagSpeedtestHandler(w http.ResponseWriter, r *http.Request) {
 		durationSec = 10
 	}
 	speedtestMgr.SetActive(SnapshotNow().ActiveConnections > 0)
+	type speedtestOut struct {
+		res diag.SpeedtestResult
+		err error
+	}
 	v, ok := runDiagWithTimeout(r.Context(), time.Duration(durationSec+2)*time.Second, func() any {
 		res, err := speedtestMgr.Run(r.Context(), durationSec, mode)
-		if err != nil {
-			return map[string]any{"error": err.Error()}
-		}
-		return res
+		return speedtestOut{res: res, err: err}
 	})
 	if !ok {
 		http.Error(w, "speedtest timed out", http.StatusGatewayTimeout)
 		return
 	}
-	if m, isMap := v.(map[string]any); isMap {
-		if msg, hasErr := m["error"]; hasErr {
-			msgStr, _ := msg.(string)
-			flog.Auditf("diag speedtest from %s refused: %s", remoteIP(r), msgStr)
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Cache-Control", "no-store")
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": msgStr, "retry_after_sec": durationSec})
-			return
+	out, _ := v.(speedtestOut)
+	if out.err != nil {
+		flog.Auditf("diag speedtest from %s refused: %s", remoteIP(r), out.err.Error())
+		status := speedtestHTTPStatus(out.err)
+		body := map[string]any{"error": out.err.Error()}
+		// A busy tunnel may clear; a missing tunnel will not appear on
+		// retry, so only busy carries retry_after_sec.
+		if errors.Is(out.err, diag.ErrBusy) {
+			body["retry_after_sec"] = durationSec
 		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(body)
+		return
 	}
-	res, _ := v.(diag.SpeedtestResult)
+	res := out.res
 	flog.Auditf("diag speedtest from %s mode=%s dur=%d up=%d down=%d mbps=%.2f", remoteIP(r), mode, res.DurationSec, res.BytesUp, res.BytesDown, res.GoodputMbps)
 	summary := mode + " " + strconv.FormatFloat(res.GoodputMbps, 'f', 2, 64) + " Mbps up " + strconv.FormatUint(res.BytesUp, 10) + " down " + strconv.FormatUint(res.BytesDown, 10)
 	recordProbe("speedtest", req.Label, summary, res)

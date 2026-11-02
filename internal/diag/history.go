@@ -2,7 +2,6 @@ package diag
 
 import (
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -30,12 +29,13 @@ type History struct {
 // NewHistory builds an empty history.
 func NewHistory() *History { return &History{} }
 
-// Record prepends an entry, evicting the oldest past historyCap.
+// Record prepends an entry, evicting the oldest past historyCap. The ID is
+// assigned under the mutex so concurrent records keep newest-first order.
 func (h *History) Record(kind, label, summary string, payload any) ProbeEntry {
-	id := atomic.AddUint64(&h.nextID, 1)
-	e := ProbeEntry{ID: id, Kind: kind, At: time.Now().UTC().Format(time.RFC3339Nano), Label: label, Summary: summary, Payload: payload}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.nextID++
+	e := ProbeEntry{ID: h.nextID, Kind: kind, At: time.Now().UTC().Format(time.RFC3339Nano), Label: label, Summary: summary, Payload: payload}
 	h.entries = append([]ProbeEntry{e}, h.entries...)
 	if len(h.entries) > historyCap {
 		h.entries = h.entries[:historyCap]
