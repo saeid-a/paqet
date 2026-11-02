@@ -198,14 +198,22 @@ func RegisterConnection(remoteAddr, localAddr string) uint64 {
 
 func UnregisterConnection(id uint64) {
 	now := time.Now().UTC()
-	connMu.RLock()
+	connMu.Lock()
 	cs := conns[id]
-	connMu.RUnlock()
 	if cs == nil {
+		connMu.Unlock()
 		return
 	}
 	cs.closedAt.Store(now)
 	cs.lastSeen.Store(now)
+	for delID, c := range conns {
+		if closedAt, ok := c.closedAt.Load().(time.Time); ok && !closedAt.IsZero() {
+			if now.Sub(closedAt) > connectionRetention {
+				delete(conns, delID)
+			}
+		}
+	}
+	connMu.Unlock()
 }
 
 func AddConnIngress(id uint64, bytes int) {
@@ -283,22 +291,21 @@ func SnapshotNow() Snapshot {
 		status := "active"
 		var closedAtStr string
 		var closedAt time.Time
-		if closedAt, ok := cs.closedAt.Load().(time.Time); ok && !closedAt.IsZero() {
+		if ca, ok := cs.closedAt.Load().(time.Time); ok && !ca.IsZero() {
 			status = "closed"
-			closedAtStr = closedAt.Format(time.RFC3339Nano)
+			closedAt = ca
+			closedAtStr = ca.Format(time.RFC3339Nano)
 		}
-		connUptime := time.Since(cs.startedAt).Seconds()
+		uptime := time.Since(cs.startedAt).Seconds()
 		if !closedAt.IsZero() {
-			connUptime = closedAt.Sub(cs.startedAt).Seconds()
+			uptime = closedAt.Sub(cs.startedAt).Seconds()
 		}
-		if connUptime == 0 {
-			connUptime = 1
+		if uptime == 0 {
+			uptime = 1
 		}
+		connUptime := uptime
 		lastSeen, _ := cs.lastSeen.Load().(time.Time)
-		uptimeSeconds := time.Since(cs.startedAt).Seconds()
-		if !closedAt.IsZero() {
-			uptimeSeconds = closedAt.Sub(cs.startedAt).Seconds()
-		}
+		uptimeSeconds := uptime
 		connSnaps = append(connSnaps, ConnSnapshot{
 			ID:             cs.id,
 			RemoteAddr:     cs.remoteAddr,
