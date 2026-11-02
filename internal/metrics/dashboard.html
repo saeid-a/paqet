@@ -176,7 +176,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="card"><div class="k">Active conns</div><div class="v num" id="aConn">—</div><div class="s">connections</div></div>
 <div class="card"><div class="k">Active streams</div><div class="v num" id="aStr">—</div><div class="s">streams</div></div>
 <div class="card"><div class="k">Runtime</div><div class="v num" id="rtGo">—</div><div class="s num" id="rtMem">—</div><div class="s num" id="rtGc">—</div><details id="rtDetail"><summary class="mono">runtime detail</summary><div class="mono" id="rtDetailBody">loading…</div></details></div>
-<div class="card"><div class="k">KCP</div><div class="v num" id="kcpRtt">—</div><div class="s num" id="kcpSub">—</div><div class="s num" id="kcpLoss">—</div></div>
+<div class="card"><div class="k">KCP</div><div class="v num" id="kcpRtt">—</div><div class="s num" id="kcpSub">—</div><div class="s num" id="kcpLoss">—</div><div class="s num" id="kcpVar">—</div><div class="s num" id="kcpSegs">—</div><div class="s num" id="kcpFecD">—</div></div>
 <div class="card" id="postureCard"><div class="k">Security posture</div><div class="v num" id="postureExp">—</div><div class="s mono" id="postureSub">—</div></div>
 <div class="card"><div class="k">Config</div><div class="v num mono" id="cfgSum" style="font-size:15px">—</div><div class="s mono" id="cfgSub">—</div><div class="s mono" id="cfgHealth">—</div></div>
 </div>
@@ -496,6 +496,21 @@ var lastStatus=null;
 var lastCfg="";
 var lastPreflight=null,lastListeners=null,lastPostureM=null,cfgBackupsN=null,heapPrev={t:0,v:0},gcRmin="";
 var gcWin=[],retxWin=[];
+var kcpWin={lost:[],retx:[],fecRec:[]};
+function fmtPerMin(r){return fmtCountRate((+r||0)*60).replace(" /s","/min");}
+function renderKcpDetail(k,now){k=k||{};now=+now||Date.now();
+var sv=pick(k,"srtt_var_ms","srtt_var","srttvar",null);
+var lost=pick(k,"lost_segs","lost",null),repeat=pick(k,"repeat_segs","repeat",null);
+var fast=pick(k,"fast_retrans_segs","fast_retrans","fastRetrans",null),early=pick(k,"early_retrans_segs","early_retrans","earlyRetrans",null);
+var fecRec=pick(k,"fec_recovered","fecRecovered",null),fecErr=pick(k,"fec_errs","fecErrs",null),fecPar=pick(k,"fec_parity_shards","fec_parity","fecParity",null);
+var inS=pick(k,"in_segs","inSegs",null),outS=pick(k,"out_segs","outSegs",null);
+var lostR=winRate(kcpWin.lost,+lost||0,now,0),retxR=winRate(kcpWin.retx,+pick(k,"retransmits","retransmit","retx",0)||0,now,0),fecR=winRate(kcpWin.fecRec,+fecRec||0,now,0);
+var hasK=sv!=null||lost!=null||repeat!=null||fast!=null||early!=null||fecRec!=null||inS!=null||outS!=null;
+if(!hasK){setT("kcpVar","var — · lost — · repeat —");setT("kcpSegs","fast — · early — · in/out —");setT("kcpFecD","fec rec — · errs — · parity —");return;}
+setT("kcpVar","var "+((sv==null||+sv<=0)?"—":fmtMs(sv))+" · lost "+((lost==null||lost===""||isNaN(+lost))?"—":fmtInt(lost)+" ("+fmtPerMin(lostR)+")")+" · repeat "+((repeat==null||repeat===""||isNaN(+repeat))?"—":fmtInt(repeat)));
+setT("kcpSegs","fast "+((fast==null||fast===""||isNaN(+fast))?"—":fmtInt(fast))+" · early "+((early==null||early===""||isNaN(+early))?"—":fmtInt(early))+" · in/out "+((inS==null||isNaN(+inS))?"—":fmtInt(inS))+"/"+((outS==null||isNaN(+outS))?"—":fmtInt(outS)));
+setT("kcpFecD","fec rec "+((fecRec==null||fecRec===""||isNaN(+fecRec))?"—":fmtInt(fecRec)+" ("+fmtPerMin(fecR)+")")+" · errs "+((fecErr==null||fecErr===""||isNaN(+fecErr))?"—":fmtInt(fecErr))+" · parity "+((fecPar==null||fecPar===""||isNaN(+fecPar))?"—":fmtInt(fecPar))+" · retx "+fmtPerMin(retxR));
+}
 // toasts: failure-spike + daemon disconnect/reconnect while the tab is open.
 // Throttled (one spike toast per 2 min) and capped at 4; the header
 // notice remains the persistent indicator, toasts are the nudge.
@@ -575,6 +590,7 @@ var rto=pick(k,"rto","rto_ms",0),cwnd=pick(k,"cwnd","snd_wnd","wnd",0);
 setT("kcpSub","rto "+((rto==null||+rto<=0)?"—":fmtMs(rto))+" · cwnd "+((cwnd==null||+cwnd<=0)?"—":fmtInt(cwnd)));
 var retx=pick(k,"retransmits","retransmit","retx",null),fec=pick(k,"fec_shards","fec","fecShards",null);
 setT("kcpLoss","retx "+(retx==null||retx===""||isNaN(+retx)?"—":fmtInt(retx))+" · fec "+(fec==null||fec===""||isNaN(+fec)||+fec<=0?"—":fmtInt(fec)));
+try{renderKcpDetail(k,now);}catch(e){}
 $("bStart").disabled=!!d.running;$("bStop").disabled=!d.running;$("bRestart").disabled=false;$("bDrain").disabled=!d.running;
 histIn.push(rIn);histOut.push(rOut);
 histConn.push(+d.active_connections||0);histStr.push(+d.active_streams||0);

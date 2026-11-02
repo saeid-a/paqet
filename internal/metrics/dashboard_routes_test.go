@@ -137,3 +137,12 @@ func TestDashboardHasSecondSparkline(t *testing.T) {
         if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
     }
 }
+
+func TestDashboardHasKcpDetail(t *testing.T) {
+    html, _ := os.ReadFile("dashboard.html")
+    s := string(html)
+    for _, want := range []string{`id="kcpVar"`, `id="kcpSegs"`, `id="kcpFecD"`, "renderKcpDetail", "srtt_var_ms", "fast_retrans_segs", "fmtInt"} {
+        if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+    }
+    if !strings.Contains(s, "kcpVar") || !strings.Contains(s, "—") { t.Fatal("missing zero-guard fallback") }
+}
