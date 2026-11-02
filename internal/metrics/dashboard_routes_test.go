@@ -110,3 +110,14 @@ func TestDashboardHasTLSExpiry(t *testing.T) {
         if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
     }
 }
+
+func TestDashboardHasAuditTimeline(t *testing.T) {
+    html, err := os.ReadFile("dashboard.html")
+    if err != nil {
+        t.Fatal(err)
+    }
+    s := string(html)
+    for _, want := range []string{`id="auditList"`, "loadAudit", `id="bAuditReload"`} {
+        if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+    }
+}

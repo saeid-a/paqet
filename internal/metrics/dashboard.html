@@ -316,6 +316,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 </div>
 <div id="logs"></div>
 </div>
+<div class="panel" id="auditList"><h2>Audit trail</h2><div class="row"><button id="bAuditReload" class="sub">Reload audit</button><span class="note" id="auditNote"></span></div><div class="wrap"><table><thead><tr><th>time</th><th>event</th></tr></thead><tbody id="auditBody"></tbody></table><div class="empty" id="auditEmpty">no audit events</div></div></div>
 </section>
 
 <section id="t-diag" class="hide">
@@ -381,7 +382,7 @@ function api(p,o){o=o||{};o.headers=authH(o.headers||{});return fetch(p,o);}
 // tabs
 var TABS=["overview","conns","targets","config","logs","diag","setup"];
 var tabs=document.querySelectorAll("button.tab");
-function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();}if(t==="diag")loadIfaces(true);if(t==="setup"){loadPreflight();loadPosture();}if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview"){loadPosture();loadRuntime();}}
+function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();loadAudit();}if(t==="diag")loadIfaces(true);if(t==="setup"){loadPreflight();loadPosture();}if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview"){loadPosture();loadRuntime();}}
 tabs.forEach(function(b){b.onclick=function(){showTab(b.dataset.t);};});
 document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=7)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
 // modal drawer
@@ -984,6 +985,21 @@ $("logSearch").addEventListener("input",function(){renderLogs(logCache);});
 try{$("logAuditOnly").addEventListener("change",function(){renderLogs(logCache);});}catch(e){}
 setTimeout(function logLoop(){if(!document.hidden)pollLogs();setTimeout(logLoop,2500);},2500);
 $("bLogDl").onclick=function(){var out=[];for(var i=0;i<logCache.length;i++){var s=logLine(logCache[i]);if(logPass(s))out.push(s);}var b=new Blob([out.join("\n")+"\n"],{type:"text/plain"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="paqet-logs.txt";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);};
+function loadAudit(){
+var tb=$("auditBody");if(!tb)return;
+function auditNote(m){var e=$("auditNote");if(e)e.textContent=m||"";}
+return api("api/logs?tail=1000",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){
+var logs=(d&&(d.logs||[]))||[];
+var rows=[];
+for(var i=0;i<logs.length;i++){var s=logLine(logs[i]);if(String(s).indexOf("AUDIT")<0)continue;rows.push(logs[i]);}
+rows=rows.slice(-100).reverse();
+while(tb.firstChild)tb.removeChild(tb.firstChild);
+$("auditEmpty").style.display=rows.length?"none":"block";
+for(var j=0;j<rows.length;j++){var tr=document.createElement("tr");var tdT=document.createElement("td");tdT.textContent=rows[j].time||"";tdT.className="mono";tr.appendChild(tdT);var tdE=document.createElement("td");tdE.textContent=logLine(rows[j]);tdE.className="mono";tdE.style.whiteSpace="normal";tr.appendChild(tdE);tb.appendChild(tr);}
+auditNote(rows.length?("audit: "+rows.length+" event(s)"):"no audit events");
+}).catch(function(e){auditNote("audit: "+String((e&&e.message)||e)+" \u2014 continuing");});
+}
+$("bAuditReload").onclick=function(){loadAudit();};
 function sseInit(){
 if(sseTried||typeof EventSource==="undefined")return;sseTried=true;
 try{
