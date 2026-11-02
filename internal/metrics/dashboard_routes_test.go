@@ -189,7 +189,7 @@ func TestDashboardForwardTestButton(t *testing.T) {
 	// Buttons are created via setAttribute in inline JS, so assert on the
 	// call form rather than literal HTML attributes. The test runs through
 	// the tunnel, not a direct dial: forward targets are dialed by the server.
-	for _, want := range []string{"listenerTest", "api/diag/tunnel", `"data-testid"`, `"fwd-test"`, `"fwd-test-result"`, "textContent", "through the tunnel"} {
+	for _, want := range []string{"listenerTest", "api/diag/tunnel", `"data-testid"`, `"fwd-test"`, `"fwd-test-result"`, "textContent", "through the tunnel", "reachable (silent)"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q", want)
 		}

@@ -228,7 +228,7 @@ func diagTunnelHandler(w http.ResponseWriter, r *http.Request) {
 		writeDiagJSON(w, map[string]any{"target": target, "ok": false, "error": perr.Error()})
 		return
 	}
-	summary := "held " + strconv.FormatInt(ms, 10) + "ms"
+	summary := "reachable " + strconv.FormatInt(ms, 10) + "ms (silent)"
 	if spoke {
 		summary = "banner " + strconv.FormatInt(ms, 10) + "ms"
 	}
