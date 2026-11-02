@@ -1067,7 +1067,7 @@ function sshCmd(b){return "ssh -N -L 9090:"+(b||sshBind)+" user@host  # then ope
 function renderSshSnippet(b){if(b)sshBind=String(b);var el=$("sshSnippet");if(!el)return;var cur=String(el.textContent||"");var m=cur.match(/^token: \S+\n/);el.textContent=(m?m[0]:"")+sshCmd(sshBind);}
 function genToken(){var t="";try{var b=new Uint8Array(32);crypto.getRandomValues(b);for(var i=0;i<b.length;i++)t+=("0"+b[i].toString(16)).slice(-2);}catch(e){var cs="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";for(var j=0;j<16;j++)t+=cs.charAt(Math.floor(Math.random()*cs.length));}var f=$("fToken");if(f)f.value=t;var el=$("sshSnippet");if(el)el.textContent="token: "+t+"\n"+sshCmd(sshBind);return t;}
 $("bGenToken").onclick=function(){genToken();setupNote("token generated — paste into admin.token, save + restart");};
-$("bSshCopy").onclick=function(){var el=$("sshSnippet");copyText(el?el.textContent:"");setupNote("SSH cmd copied");};
+$("bSshCopy").onclick=function(){copyText(sshCmd(sshBind));setupNote("SSH cmd copied");};
 try{renderSshSnippet();}catch(e){}
 $("q").addEventListener("input",applyFilter);
 try{$("connGone").addEventListener("change",function(){showGone=this.checked;applyFilter();});}catch(e){}
