@@ -53,6 +53,7 @@ func (l *Listener) Accept() (tnet.Conn, error) {
 		addrString(conn.RemoteAddr()),
 		addrString(conn.LocalAddr()),
 	)
+	trackSession(conn, sess)
 	return &Conn{UDPSession: conn, Session: sess, counted: true, metricsID: metricsID}, nil
 }
 

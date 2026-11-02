@@ -74,6 +74,7 @@ func (c *Conn) Close() error {
 		if c.metricsID != 0 {
 			metrics.UnregisterConnection(c.metricsID)
 		}
+		untrackSession(c.UDPSession)
 	})
 	if c.Session != nil {
 		if e := c.Session.Close(); e != nil {
