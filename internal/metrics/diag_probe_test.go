@@ -49,3 +49,12 @@ func TestDiagMTURejectsBadPort(t *testing.T) {
 		t.Fatalf("want 400, got %d", rec.Code)
 	}
 }
+
+func TestDiagSpeedtestRejectsBadMode(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/diag/speedtest", strings.NewReader(`{"duration_sec":5,"mode":"sideways"}`))
+	rec := httptest.NewRecorder()
+	diagSpeedtestHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", rec.Code)
+	}
+}

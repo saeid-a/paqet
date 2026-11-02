@@ -238,3 +238,70 @@ func diagMTUHandler(w http.ResponseWriter, r *http.Request) {
 	flog.Auditf("diag mtu %s:%d from %s iface=%d kcp=%d probe=%d", host, req.Port, remoteIP(r), res.InterfaceMTU, res.KCPMTU, res.ProbeMTU)
 	writeDiagJSON(w, res)
 }
+
+// speedtestMgr is the shared single-flight manager. Its snapshot hook
+// reads live SnapshotNow counters (same package, no import cycle); the
+// transfer window observes real tunnel traffic for the duration.
+var speedtestMgr = diag.NewSpeedtestManager(func() (uint64, uint64, uint64, uint64, uint64) {
+	snap := SnapshotNow()
+	return snap.BytesIn, snap.BytesOut, snap.KCP.Retransmits, snap.KCP.LostSegs, snap.KCP.FECRecovered
+})
+
+// diagSpeedtestHandler serves POST /api/diag/speedtest.
+func diagSpeedtestHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	var req struct {
+		DurationSec int    `json:"duration_sec"`
+		Mode        string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "" {
+		mode = "up"
+	}
+	if !diag.ValidSpeedtestMode(mode) {
+		http.Error(w, "unknown mode (want up|down|bidir)", http.StatusBadRequest)
+		return
+	}
+	durationSec := req.DurationSec
+	if durationSec <= 0 {
+		durationSec = 10
+	}
+	if durationSec > 10 {
+		durationSec = 10
+	}
+	speedtestMgr.SetActive(SnapshotNow().ActiveConnections > 0)
+	v, ok := runDiagWithTimeout(r.Context(), time.Duration(durationSec+2)*time.Second, func() any {
+		res, err := speedtestMgr.Run(r.Context(), durationSec, mode)
+		if err != nil {
+			return map[string]any{"error": err.Error()}
+		}
+		return res
+	})
+	if !ok {
+		http.Error(w, "speedtest timed out", http.StatusGatewayTimeout)
+		return
+	}
+	if m, isMap := v.(map[string]any); isMap {
+		if msg, hasErr := m["error"]; hasErr {
+			msgStr, _ := msg.(string)
+			flog.Auditf("diag speedtest from %s refused: %s", remoteIP(r), msgStr)
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": msgStr, "retry_after_sec": durationSec})
+			return
+		}
+	}
+	res, _ := v.(diag.SpeedtestResult)
+	flog.Auditf("diag speedtest from %s mode=%s dur=%d up=%d down=%d mbps=%.2f", remoteIP(r), mode, res.DurationSec, res.BytesUp, res.BytesDown, res.GoodputMbps)
+	writeDiagJSON(w, res)
+}
