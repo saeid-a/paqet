@@ -109,6 +109,8 @@ button:focus-visible{outline:none;border-color:var(--blu);box-shadow:0 0 0 3px r
 #cfgErrs li .fld{font-family:ui-monospace,Menlo,Consolas,monospace;color:#fff}
 #connTable th[data-sk]{cursor:pointer;white-space:nowrap}
 #connTable th[data-sk]:hover{color:var(--fg)}
+#connTable tr.gone td{opacity:.5}
+#cfgDrift{margin:0 0 8px;padding:6px 10px;font-size:12px;border-radius:6px;background:#2e2410;border:1px solid #92600e;color:#fde68a;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 #connTop{margin:0;min-height:0}
 #toasts{position:fixed;top:12px;right:12px;z-index:80;display:flex;flex-direction:column;gap:8px;max-width:360px}
 .toast{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--blu);border-radius:8px;padding:8px 10px;font-size:12px;box-shadow:0 12px 32px rgba(0,0,0,.45);display:flex;gap:8px;align-items:flex-start}
@@ -180,7 +182,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 
 <section id="t-conns" class="hide">
 <div class="panel"><h2>Connections</h2>
-<div class="row"><input type="text" id="q" placeholder="filter by addr, id, status…"><span class="note" id="connTop"></span></div>
+<div class="row"><input type="text" id="q" placeholder="filter by addr, id, status…"><label class="chk"><input type="checkbox" id="connGone" checked> recently closed</label><span class="note" id="connTop"></span></div>
 <div class="wrap"><table id="connTable"><thead><tr><th data-sk="id">id</th><th data-sk="remote">remote</th><th data-sk="local">local</th><th data-sk="status">status</th><th class="n" data-sk="uptime">uptime</th><th class="n" data-sk="in">in</th><th class="n" data-sk="out">out</th><th class="n" data-sk="rin">in/s</th><th class="n" data-sk="rout">out/s</th><th class="n" data-sk="tot">tot/s</th><th class="n" data-sk="streams">streams</th></tr></thead><tbody id="connBody"></tbody></table>
 <div class="empty" id="connEmpty">no connections</div></div></div>
 </section>
@@ -206,6 +208,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <button id="bCfgSave" class="primary">Save</button>
 <button id="bCfgSaveRestart">Save + Restart</button>
 </div>
+<div id="cfgDrift" class="hide"><span>config changed on disk — reload to see external edits?</span><span style="flex:1"></span><button id="bDriftReload" class="sub">Reload</button><button id="bDriftDismiss" class="sub">Dismiss</button></div>
 <div id="c-yaml">
 <textarea id="cfg" spellcheck="false"></textarea>
 <div id="cfgDiffWrap" class="diff-wrap hide">
@@ -371,23 +374,38 @@ var connWins={},connSort={key:"tot",dir:-1};
 function connId(c){return String(c.id!=null&&c.id!==""?c.id:(c.remote_addr||"?"));}
 function connRates(now){var seen={};(connCache||[]).forEach(function(c){var k=connId(c);seen[k]=1;var w=connWins[k]||(connWins[k]={in:[],out:[]});c._rin=winRate(w.in,c.bytes_in,now,0);c._rout=winRate(w.out,c.bytes_out,now,0);c._rate=(c._rin||0)+(c._rout||0);});Object.keys(connWins).forEach(function(k){if(!seen[k])delete connWins[k];});}
 function connVal(c,k){switch(k){case "id":return String(c.id==null?"":c.id);case "remote":return String(c.remote_addr||"").toLowerCase();case "local":return String(c.local_addr||"").toLowerCase();case "status":return String(c.status||"").toLowerCase();case "uptime":return +c.uptime_seconds||0;case "in":return +c.bytes_in||0;case "out":return +c.bytes_out||0;case "rin":return c._rin||0;case "rout":return c._rout||0;case "tot":return c._rate||0;case "streams":return +c.active_streams||0;}return 0;}
-function renderConns(list){connCache=list||[];connRates(Date.now());applyFilter();}
+function renderConns(list){list=list||[];var now=Date.now();trackGone(list,now);connCache=list;connRates(now);applyFilter();}
+// lifecycle: vanished ids are kept as dimmed tombstones (status "closed")
+// so a disconnect stays visible instead of silently dropping off the table.
+// Tombstones never feed rates/top-talker; reappearing ids clear them.
+var connGone=[],showGone=true;
+function trackGone(list,now){
+var seen={};for(var i=0;i<list.length;i++)seen[connId(list[i])]=1;
+connGone=connGone.filter(function(g){return !seen[g.key];});
+(connCache||[]).forEach(function(c){
+var k=connId(c);
+if(!seen[k])connGone.unshift({key:k,id:c.id,remote_addr:c.remote_addr,local_addr:c.local_addr,status:"closed",uptime_seconds:c.uptime_seconds||0,bytes_in:c.bytes_in||0,bytes_out:c.bytes_out||0,active_streams:0,_rin:0,_rout:0,_rate:0,started_at:c.started_at,last_seen:c.last_seen||new Date(now).toISOString(),closedAt:now});
+});
+connGone=connGone.filter(function(g){return now-g.closedAt<600000;}).slice(0,20);
+}
 function applyFilter(){
 var q=($("q").value||"").toLowerCase(),tb=$("connBody");while(tb.firstChild)tb.removeChild(tb.firstChild);
-var list=connCache.filter(function(c){if(!q)return true;return (""+c.id).indexOf(q)>=0||(""+c.remote_addr).toLowerCase().indexOf(q)>=0||(""+c.local_addr).toLowerCase().indexOf(q)>=0||(""+c.status).toLowerCase().indexOf(q)>=0;});
+var base=showGone?connCache.concat(connGone):connCache.slice();
+var list=base.filter(function(c){if(!q)return true;return (""+c.id).indexOf(q)>=0||(""+c.remote_addr).toLowerCase().indexOf(q)>=0||(""+c.local_addr).toLowerCase().indexOf(q)>=0||(""+c.status).toLowerCase().indexOf(q)>=0;});
 var top=null;(connCache||[]).forEach(function(c){if(!top||(c._rate||0)>(top._rate||0))top=c;});
 setT("connTop",top?("top talker: "+(top.remote_addr||top.id)+" · "+fmtRate(top._rate||0)):"");
 var sk=connSort.key,dir=connSort.dir;
 list.sort(function(a,b){var va=connVal(a,sk),vb=connVal(b,sk);return (va<vb?-1:va>vb?1:0)*dir;});
-setT("connCount",connCache.length?"("+connCache.length+")":"");$("connEmpty").style.display=list.length?"none":"block";
+setT("connCount",connCache.length?("("+connCache.length+(connGone.length?" +"+connGone.length+" closed":"")+")"):"");$("connEmpty").style.display=list.length?"none":"block";
 var n=Math.min(list.length,200);
-for(var i=0;i<n;i++){(function(c){var tr=document.createElement("tr");tr.className="clickable";
+for(var i=0;i<n;i++){(function(c){var tr=document.createElement("tr");tr.className="clickable"+(c.closedAt?" gone":"");
 function cell(t,cls){var td=document.createElement("td");td.textContent=t;td.className=cls;tr.appendChild(td);}
 cell(c.id,"n num");cell(""+c.remote_addr,"mono");cell(""+c.local_addr,"mono");
-var st=document.createElement("td");st.textContent=""+c.status;st.className=c.status==="active"?"st-active":"st-closed";tr.appendChild(st);
+var st=document.createElement("td");st.textContent=c.closedAt?"closed":""+c.status;st.className=c.closedAt||c.status!=="active"?"st-closed":"st-active";tr.appendChild(st);
 cell(fmtDur(c.uptime_seconds),"n num");cell(fmtBytes(c.bytes_in),"n num");cell(fmtBytes(c.bytes_out),"n num");
 cell(fmtRate(c._rin||0),"n num");cell(fmtRate(c._rout||0),"n num");cell(fmtRate(c._rate||0),"n num");cell(""+c.active_streams,"n num");
-if(c.started_at)tr.title="started "+c.started_at+" · last seen "+c.last_seen+(c.closed_at?" · closed "+c.closed_at:"");
+if(c.closedAt)tr.title="closed "+fmtDur((Date.now()-c.closedAt)/1000)+" ago"+(c.started_at?" · started "+c.started_at:"")+(c.last_seen?" · last seen "+c.last_seen:"");
+else if(c.started_at)tr.title="started "+c.started_at+" · last seen "+c.last_seen+(c.closed_at?" · closed "+c.closed_at:"");
 tr.onclick=function(){openModal(c);};tb.appendChild(tr);})(list[i]);}
 }
 function paintConnSort(){var ths=document.querySelectorAll("#connTable th[data-sk]");for(var i=0;i<ths.length;i++){var th=ths[i];if(th.dataset.base==null)th.dataset.base=th.textContent.replace(/ [▲▼]$/,"");th.textContent=th.dataset.base+(th.dataset.sk===connSort.key?(connSort.dir<0?" ▼":" ▲"):"");}}
@@ -482,6 +500,22 @@ $("bStart").onclick=function(){control("start");};$("bStop").onclick=function(){
 document.querySelectorAll("button.sub[data-ct]").forEach(function(b){b.onclick=function(){document.querySelectorAll("button.sub[data-ct]").forEach(function(x){x.classList.toggle("on",x===b);});$("c-yaml").classList.toggle("hide",b.dataset.ct!=="yaml");$("c-form").classList.toggle("hide",b.dataset.ct!=="form");if(b.dataset.ct==="form"){loadIfaces(false);loadBackups();}};});
 var cfgLoaded=false;
 function loadCfg(force){api("api/config",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(!cfgLoaded||force||document.activeElement!==$("cfg")){$("cfg").value=d.yaml||"";lastCfg=d.yaml||"";fillForm(d.yaml||"");}setT("cfgPath2",d.path||"");cfgMsg("loaded "+(d.path||""),true);renderCfgErrs([]);refreshCfgDiff();cfgLoaded=true;}).catch(function(e){cfgMsg("load failed: "+e.message,false);});}
+// drift: someone/something edited the config file outside this page.
+// Poll slowly; banner offers reload. Dismiss silences until the next
+// on-disk change. Never clobbers the textarea on its own.
+var driftDismissed=false,lastDiskSeen=null;
+function checkDrift(){
+api("api/config",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){
+var disk=String(d.yaml==null?"":d.yaml);
+if(disk!==lastDiskSeen){lastDiskSeen=disk;driftDismissed=false;}
+var w=$("cfgDrift");if(!w)return;
+var drifted=disk!==lastCfg&&disk!==String($("cfg").value);
+w.classList.toggle("hide",!(drifted&&!driftDismissed));
+}).catch(function(){});
+}
+function driftLoop(){try{if(!document.hidden)checkDrift();}catch(e){}setTimeout(driftLoop,15000);}
+$("bDriftReload").onclick=function(){var w=$("cfgDrift");if(w)w.classList.add("hide");driftDismissed=true;loadCfg(true);};
+$("bDriftDismiss").onclick=function(){var w=$("cfgDrift");if(w)w.classList.add("hide");driftDismissed=true;};
 function cfgMsg(m,ok){var e=$("cfgMsg");e.textContent=m;e.className="mono "+(ok?"ok":"err");}
 function formNote(m,warn){var e=$("formNote");e.textContent=m||"";e.className="note"+(warn?" warn":"");}
 // diff preview: unified line diff of textarea vs lastCfg with collapsed context,
@@ -884,7 +918,8 @@ function loadLogLevel(){return api("api/log",{cache:"no-store"}).then(function(r
 $("bLogSet").onclick=function(){var lv=$("logSetLevel").value;if(!lv){logLvlNote("pick a level first",true);return;}logLvlNote("setting…");api("api/log",{method:"POST",body:JSON.stringify({level:lv}),cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(){logLvlNote("level: "+lv);pollLogs();}).catch(function(e){logLvlNote("set level: "+e.message,true);});};
 $("bDump").onclick=function(){var p=($("fwPort").value||"").trim()||"9999";diagSay("dump capture on port "+p+"…");api("api/diag/dump",{method:"POST",body:JSON.stringify({port:parseInt(p,10)||9999,count:10}),cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("dump endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(t){diagSay("dump port "+p+":\n"+t);try{var b=new Blob([t],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="paqet-dump-"+p+".json";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);}catch(e){}}).catch(function(e){diagSay("dump: "+e.message+" — endpoint may not exist; continuing.");});};
 $("q").addEventListener("input",applyFilter);
-fitCanvas();poll();sseInit();
+try{$("connGone").addEventListener("change",function(){showGone=this.checked;applyFilter();});}catch(e){}
+fitCanvas();poll();driftLoop();sseInit();
 </script>
 </body>
 </html>
