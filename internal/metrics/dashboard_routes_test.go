@@ -146,3 +146,11 @@ func TestDashboardHasKcpDetail(t *testing.T) {
     }
     if !strings.Contains(s, "kcpVar") || !strings.Contains(s, "—") { t.Fatal("missing zero-guard fallback") }
 }
+
+func TestDashboardHasTransportPressure(t *testing.T) {
+    html, _ := os.ReadFile("dashboard.html")
+    s := string(html)
+    for _, want := range []string{`id="trQueues"`, `id="trHint"`, "renderTransport", "snd_queue", "target_fill", "no data"} {
+        if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+    }
+}

@@ -187,6 +187,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="row"><label class="chk">spike +<input type="number" id="alertThr" value="10" min="1" max="1000" style="width:64px"> /min</label><label class="chk"><input type="checkbox" id="alertMute"> mute</label></div>
 </div>
 <div class="panel"><h2>Success / failure</h2><div class="note" id="sfNote"></div><div class="wrap"><table id="sf"><tr><th>Channel</th><th class="n">Success</th><th class="n">Failure</th><th class="n">Succ/s</th><th class="n">Fail/s</th><th>health</th></tr></table></div></div>
+<div class="panel"><h2>Transport pressure</h2><div class="mono" id="trQueues">loading…</div><div class="mono" id="trStreams">—</div><div class="note" id="trHint">no data</div></div>
 <div class="panel"><h2>Health</h2><div class="mono" id="healthBody" style="white-space:pre-wrap">loading…</div></div>
 <p class="note">Click a connection row for JSON detail.</p>
 </section>
@@ -511,6 +512,19 @@ setT("kcpVar","var "+((sv==null||+sv<=0)?"—":fmtMs(sv))+" · lost "+((lost==nu
 setT("kcpSegs","fast "+((fast==null||fast===""||isNaN(+fast))?"—":fmtInt(fast))+" · early "+((early==null||early===""||isNaN(+early))?"—":fmtInt(early))+" · in/out "+((inS==null||isNaN(+inS))?"—":fmtInt(inS))+"/"+((outS==null||isNaN(+outS))?"—":fmtInt(outS)));
 setT("kcpFecD","fec rec "+((fecRec==null||fecRec===""||isNaN(+fecRec))?"—":fmtInt(fecRec)+" ("+fmtPerMin(fecR)+")")+" · errs "+((fecErr==null||fecErr===""||isNaN(+fecErr))?"—":fmtInt(fecErr))+" · parity "+((fecPar==null||fecPar===""||isNaN(+fecPar))?"—":fmtInt(fecPar))+" · retx "+fmtPerMin(retxR));
 }
+function renderTransport(tr,kcp){tr=tr||{};kcp=kcp||{};
+var sq=pick(tr,"snd_queue","sndQueue",null),rq=pick(tr,"rcv_queue","rcvQueue",null),sb=pick(tr,"snd_buf","sndBuf",null);
+var ns=pick(tr,"num_streams","numStreams",null),nc=pick(tr,"num_conns","numConns",null);
+var fill=pick(tr,"target_fill","targetFill",null),cap=pick(tr,"target_cap","targetCap",null);
+var rtx=pick(tr,"retrans_segs","retransSegs",null),lost=pick(tr,"lost_segs","lostSegs",null),fec=pick(tr,"fec_recovered","fecRecovered",null);
+var hasT=sq!=null||rq!=null||sb!=null||ns!=null||nc!=null||fill!=null||rtx!=null||lost!=null||fec!=null;
+if(!hasT){setT("trQueues","—");setT("trStreams","—");setT("trHint","no data");return;}
+setT("trQueues","snd_q "+((sq==null||isNaN(+sq))?"—":fmtInt(sq))+" · rcv_q "+((rq==null||isNaN(+rq))?"—":fmtInt(rq))+" · snd_buf "+((sb==null||isNaN(+sb))?"—":fmtInt(sb)));
+setT("trStreams","streams "+((ns==null||isNaN(+ns))?"—":fmtInt(ns))+" · conns "+((nc==null||isNaN(+nc))?"—":fmtInt(nc))+" · fill "+((fill==null||isNaN(+fill))?"—":fmtInt(fill))+"/"+((cap==null||isNaN(+cap))?"—":fmtInt(cap))+" · retx "+((rtx==null||isNaN(+rtx))?"—":fmtInt(rtx))+" · lost "+((lost==null||isNaN(+lost))?"—":fmtInt(lost))+" · fec "+((fec==null||isNaN(+fec))?"—":fmtInt(fec)));
+var hint="no data",q=(+sq||0)+(+rq||0);
+try{var cwnd=+pick(kcp,"cwnd","snd_wnd","wnd",0)||0;if(q>0&&cwnd<=0)hint="congestion suspect — rising queue, cwnd flat";else if(q>0)hint="queue building — watch cwnd + loss";else if(q===0)hint="queues clear";}catch(e){hint="no data";}
+setT("trHint",hint);
+}
 // toasts: failure-spike + daemon disconnect/reconnect while the tab is open.
 // Throttled (one spike toast per 2 min) and capped at 4; the header
 // notice remains the persistent indicator, toasts are the nudge.
@@ -591,6 +605,7 @@ setT("kcpSub","rto "+((rto==null||+rto<=0)?"—":fmtMs(rto))+" · cwnd "+((cwnd=
 var retx=pick(k,"retransmits","retransmit","retx",null),fec=pick(k,"fec_shards","fec","fecShards",null);
 setT("kcpLoss","retx "+(retx==null||retx===""||isNaN(+retx)?"—":fmtInt(retx))+" · fec "+(fec==null||fec===""||isNaN(+fec)||+fec<=0?"—":fmtInt(fec)));
 try{renderKcpDetail(k,now);}catch(e){}
+try{renderTransport(d.transport||{},k);}catch(e){}
 $("bStart").disabled=!!d.running;$("bStop").disabled=!d.running;$("bRestart").disabled=false;$("bDrain").disabled=!d.running;
 histIn.push(rIn);histOut.push(rOut);
 histConn.push(+d.active_connections||0);histStr.push(+d.active_streams||0);
