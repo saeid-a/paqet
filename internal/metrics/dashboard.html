@@ -47,7 +47,7 @@ canvas#spark{width:100%;height:140px;display:block;background:#0a0d13;border:1px
 table{width:100%;border-collapse:collapse;font-size:12px}
 th,td{text-align:right;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
 th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
-th{color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.5px}
+th{color:var(--dim);text-transform:uppercase;font-size:11px;letter-spacing:.5px}
 .ok-t{color:var(--grn)}.bad-t{color:var(--red)}
 .wrap{overflow-x:auto}
 .st-active{color:var(--grn)}.st-closed{color:var(--dim)}
@@ -91,6 +91,33 @@ button:focus-visible{outline:none;border-color:var(--blu);box-shadow:0 0 0 3px r
 .sugg .opt .v{font-weight:600}
 .sugg .opt .d{margin-left:auto;font-size:11px;color:var(--dim)}
 .sugg .opt.on,.sugg .opt:hover{background:rgba(96,165,250,.14)}
+.diff-wrap{margin-top:8px;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.diff-head{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);background:rgba(96,165,250,.06)}
+.diff-head .note{margin:0;min-height:0}
+#cfgDiff{max-height:320px;overflow-y:auto;background:var(--inp);padding:6px 0;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+#cfgDiff .dl{padding:1px 10px 1px 8px;white-space:pre-wrap;word-break:break-all;border-left:3px solid transparent}
+#cfgDiff .dl .sgn{display:inline-block;width:14px;color:var(--dim);user-select:none}
+#cfgDiff .dl.add{background:rgba(52,211,153,.09);border-left-color:var(--grn)}
+#cfgDiff .dl.add .sgn{color:var(--grn)}
+#cfgDiff .dl.del{background:rgba(248,113,113,.09);border-left-color:var(--red)}
+#cfgDiff .dl.del .sgn{color:var(--red)}
+#cfgDiff .dl.hunk{color:var(--blu);font-size:11px;padding:4px 10px 4px 8px}
+#cfgDiff .dl.ctx{color:var(--dim)}
+#cfgDiff .dl.none{color:var(--dim);border-left-color:transparent}
+#cfgErrs{list-style:none;margin:6px 0 0;padding:0}
+#cfgErrs li{font-size:12px;color:#fecaca;background:#3b1212;border:1px solid #7f2d2d;border-radius:6px;padding:5px 10px;margin-top:4px}
+#cfgErrs li .fld{font-family:ui-monospace,Menlo,Consolas,monospace;color:#fff}
+#connTable th[data-sk]{cursor:pointer;white-space:nowrap}
+#connTable th[data-sk]:hover{color:var(--fg)}
+#connTop{margin:0;min-height:0}
+#toasts{position:fixed;top:12px;right:12px;z-index:80;display:flex;flex-direction:column;gap:8px;max-width:360px}
+.toast{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--blu);border-radius:8px;padding:8px 10px;font-size:12px;box-shadow:0 12px 32px rgba(0,0,0,.45);display:flex;gap:8px;align-items:flex-start}
+.toast.warn{border-left-color:var(--amber)}
+.toast.err{border-left-color:var(--red)}
+.toast.ok{border-left-color:var(--grn)}
+.toast span{flex:1}
+.toast button{padding:2px 8px;font-size:11px}
+@media(max-width:640px){#toasts{left:12px;right:12px;max-width:none}}
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
 #modalBox{background:var(--panel);border:1px solid var(--line);border-radius:8px;max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column}
 #modalHead{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px}
@@ -121,6 +148,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <span class="ver mono" id="cfgPath" style="align-self:center"></span>
 </div>
 <div id="notice" class="mono"></div>
+<div id="toasts" aria-live="polite"></div>
 </header>
 
 <nav role="tablist">
@@ -152,8 +180,8 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 
 <section id="t-conns" class="hide">
 <div class="panel"><h2>Connections</h2>
-<div class="row"><input type="text" id="q" placeholder="filter by addr, id, status…"></div>
-<div class="wrap"><table><thead><tr><th>id</th><th>remote</th><th>local</th><th>status</th><th class="n">uptime</th><th class="n">in</th><th class="n">out</th><th class="n">streams</th></tr></thead><tbody id="connBody"></tbody></table>
+<div class="row"><input type="text" id="q" placeholder="filter by addr, id, status…"><span class="note" id="connTop"></span></div>
+<div class="wrap"><table id="connTable"><thead><tr><th data-sk="id">id</th><th data-sk="remote">remote</th><th data-sk="local">local</th><th data-sk="status">status</th><th class="n" data-sk="uptime">uptime</th><th class="n" data-sk="in">in</th><th class="n" data-sk="out">out</th><th class="n" data-sk="rin">in/s</th><th class="n" data-sk="rout">out/s</th><th class="n" data-sk="tot">tot/s</th><th class="n" data-sk="streams">streams</th></tr></thead><tbody id="connBody"></tbody></table>
 <div class="empty" id="connEmpty">no connections</div></div></div>
 </section>
 
@@ -162,6 +190,10 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="row"><button id="bCsv">Export CSV</button><span class="note" id="tgtNote"></span></div>
 <div class="wrap"><table><thead><tr><th>target</th><th class="n">in</th><th class="n">out</th><th class="n">success</th><th class="n">fail</th></tr></thead><tbody id="tgtBody"></tbody></table>
 <div class="empty" id="tgtEmpty">no targets</div></div></div>
+<div class="panel"><h2>Listeners</h2>
+<div class="row"><button id="bLstRefresh">Refresh</button><span class="note" id="lstNote"></span></div>
+<div class="wrap"><table><thead><tr><th>listener</th><th>detail</th><th>state</th><th>action</th></tr></thead><tbody id="lstBody"></tbody></table>
+<div class="empty" id="lstEmpty">no listener data — open this tab to load</div></div></div>
 </section>
 
 <section id="t-config" class="hide">
@@ -170,11 +202,17 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <button class="sub on" data-ct="yaml">YAML</button>
 <button class="sub" data-ct="form">Form</button>
 <button id="bCfgLoad">Reload from disk</button>
+<button id="bCfgDiff" class="sub" title="show unified diff of unsaved changes vs last loaded/saved config" aria-expanded="false">Preview diff</button>
 <button id="bCfgSave" class="primary">Save</button>
 <button id="bCfgSaveRestart">Save + Restart</button>
 </div>
 <div id="c-yaml">
 <textarea id="cfg" spellcheck="false"></textarea>
+<div id="cfgDiffWrap" class="diff-wrap hide">
+<div class="diff-head"><span class="note" id="cfgDiffStats"></span><span style="flex:1"></span><button id="bCfgDiffHide" class="sub">Hide</button></div>
+<div id="cfgDiff" class="mono" aria-live="polite"></div>
+</div>
+<ul id="cfgErrs" class="hide" aria-live="assertive"></ul>
 <div id="cfgMsg" class="mono"></div>
 <p style="font-size:12px;color:var(--dim);margin-top:6px">Saving validates YAML first. Restart is required to apply changes.</p>
 </div>
@@ -260,6 +298,9 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <label class="chk"><input type="checkbox" id="logPause"> pause</label>
 <button id="bLogRefresh">Refresh</button>
 <button id="bLogDl">Download</button>
+<select id="logSetLevel" title="server log level (applies immediately)"><option value="">level…</option><option value="none">none</option><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option><option value="fatal">fatal</option></select>
+<button id="bLogSet">Set Level</button>
+<span class="note" id="logLvlNote"></span>
 </div>
 <div id="logs"></div>
 </div>
@@ -271,6 +312,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <button id="bPing">Ping</button>
 <input type="text" id="fwPort" placeholder="port, e.g. 8080" style="max-width:140px">
 <button id="bFw">Firewall Check</button>
+<button id="bDump" title="capture packets on the firewall port (diag dump)">Dump Capture</button>
 <button id="bIfaces">List Interfaces</button>
 </div>
 <div class="note" id="diagNote"></div>
@@ -313,7 +355,7 @@ function api(p,o){o=o||{};o.headers=authH(o.headers||{});return fetch(p,o);}
 // tabs
 var TABS=["overview","conns","targets","config","logs","diag"];
 var tabs=document.querySelectorAll("button.tab");
-function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs")pollLogs();if(t==="diag")loadIfaces(true);if(t==="targets"&&lastStatus)renderTargets(lastStatus);}
+function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();}if(t==="diag")loadIfaces(true);if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}}
 tabs.forEach(function(b){b.onclick=function(){showTab(b.dataset.t);};});
 document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=6)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
 // modal drawer
@@ -323,18 +365,33 @@ $("modal").addEventListener("click",function(e){if(e.target===this)this.classLis
 function sfRow(name,ok,fail){var tr=document.createElement("tr"),a=document.createElement("td"),b=document.createElement("td"),c=document.createElement("td");a.textContent=name;b.textContent=fmtInt(ok);b.className="n num ok-t";c.textContent=fmtInt(fail);c.className="n num bad-t";tr.appendChild(a);tr.appendChild(b);tr.appendChild(c);return tr;}
 var sfBody=null;
 function renderSF(d){if(!sfBody){sfBody=document.createElement("tbody");$("sf").appendChild(sfBody);}while(sfBody.firstChild)sfBody.removeChild(sfBody.firstChild);var rows=[["total",d.success_total,d.failure_total],["tcp",d.success_tcp,d.failure_tcp],["udp",d.success_udp,d.failure_udp],["socks",d.success_socks,d.failure_socks],["fwd tcp",d.success_forward_tcp,d.failure_forward_tcp],["fwd udp",d.success_forward_udp,d.failure_forward_udp]];for(var i=0;i<rows.length;i++)sfBody.appendChild(sfRow(rows[i][0],rows[i][1],rows[i][2]));}
-function renderConns(list){connCache=list||[];applyFilter();}
+// per-connection live rates: one sliding window per conn id, same 10s
+// winRate helper as the cards. Windows for vanished ids are pruned.
+var connWins={},connSort={key:"tot",dir:-1};
+function connId(c){return String(c.id!=null&&c.id!==""?c.id:(c.remote_addr||"?"));}
+function connRates(now){var seen={};(connCache||[]).forEach(function(c){var k=connId(c);seen[k]=1;var w=connWins[k]||(connWins[k]={in:[],out:[]});c._rin=winRate(w.in,c.bytes_in,now,0);c._rout=winRate(w.out,c.bytes_out,now,0);c._rate=(c._rin||0)+(c._rout||0);});Object.keys(connWins).forEach(function(k){if(!seen[k])delete connWins[k];});}
+function connVal(c,k){switch(k){case "id":return String(c.id==null?"":c.id);case "remote":return String(c.remote_addr||"").toLowerCase();case "local":return String(c.local_addr||"").toLowerCase();case "status":return String(c.status||"").toLowerCase();case "uptime":return +c.uptime_seconds||0;case "in":return +c.bytes_in||0;case "out":return +c.bytes_out||0;case "rin":return c._rin||0;case "rout":return c._rout||0;case "tot":return c._rate||0;case "streams":return +c.active_streams||0;}return 0;}
+function renderConns(list){connCache=list||[];connRates(Date.now());applyFilter();}
 function applyFilter(){
 var q=($("q").value||"").toLowerCase(),tb=$("connBody");while(tb.firstChild)tb.removeChild(tb.firstChild);
 var list=connCache.filter(function(c){if(!q)return true;return (""+c.id).indexOf(q)>=0||(""+c.remote_addr).toLowerCase().indexOf(q)>=0||(""+c.local_addr).toLowerCase().indexOf(q)>=0||(""+c.status).toLowerCase().indexOf(q)>=0;});
+var top=null;(connCache||[]).forEach(function(c){if(!top||(c._rate||0)>(top._rate||0))top=c;});
+setT("connTop",top?("top talker: "+(top.remote_addr||top.id)+" · "+fmtRate(top._rate||0)):"");
+var sk=connSort.key,dir=connSort.dir;
+list.sort(function(a,b){var va=connVal(a,sk),vb=connVal(b,sk);return (va<vb?-1:va>vb?1:0)*dir;});
 setT("connCount",connCache.length?"("+connCache.length+")":"");$("connEmpty").style.display=list.length?"none":"block";
 var n=Math.min(list.length,200);
 for(var i=0;i<n;i++){(function(c){var tr=document.createElement("tr");tr.className="clickable";
-var cells=[c.id,""+c.remote_addr,""+c.local_addr,""+c.status,fmtDur(c.uptime_seconds),fmtBytes(c.bytes_in),fmtBytes(c.bytes_out),""+c.active_streams];
-for(var j=0;j<cells.length;j++){var td=document.createElement("td");td.textContent=cells[j];td.className=(j===0||j>=4)?"n num":"mono";if(j===3)td.className=c.status==="active"?"st-active":"st-closed";tr.appendChild(td);}
+function cell(t,cls){var td=document.createElement("td");td.textContent=t;td.className=cls;tr.appendChild(td);}
+cell(c.id,"n num");cell(""+c.remote_addr,"mono");cell(""+c.local_addr,"mono");
+var st=document.createElement("td");st.textContent=""+c.status;st.className=c.status==="active"?"st-active":"st-closed";tr.appendChild(st);
+cell(fmtDur(c.uptime_seconds),"n num");cell(fmtBytes(c.bytes_in),"n num");cell(fmtBytes(c.bytes_out),"n num");
+cell(fmtRate(c._rin||0),"n num");cell(fmtRate(c._rout||0),"n num");cell(fmtRate(c._rate||0),"n num");cell(""+c.active_streams,"n num");
 if(c.started_at)tr.title="started "+c.started_at+" · last seen "+c.last_seen+(c.closed_at?" · closed "+c.closed_at:"");
 tr.onclick=function(){openModal(c);};tb.appendChild(tr);})(list[i]);}
 }
+function paintConnSort(){var ths=document.querySelectorAll("#connTable th[data-sk]");for(var i=0;i<ths.length;i++){var th=ths[i];if(th.dataset.base==null)th.dataset.base=th.textContent.replace(/ [▲▼]$/,"");th.textContent=th.dataset.base+(th.dataset.sk===connSort.key?(connSort.dir<0?" ▼":" ▲"):"");}}
+try{(function(){var ths=document.querySelectorAll("#connTable th[data-sk]");for(var i=0;i<ths.length;i++){(function(th){th.onclick=function(){var k=th.dataset.sk;if(connSort.key===k)connSort.dir*=-1;else{connSort.key=k;connSort.dir=(k==="remote"||k==="local"||k==="status"||k==="id")?1:-1;}paintConnSort();applyFilter();};})(ths[i]);}paintConnSort();})();}catch(e){}
 // targets: prefer d.targets, else aggregate connections by remote
 function renderTargets(d){
 var rows=[];
@@ -358,6 +415,29 @@ function pick(o){for(var i=1;i<arguments.length;i++){var k=arguments[i];if(o&&o[
 function fmtMs(v){if(v==null||v===""||isNaN(+v))return "—";return (+v)+" ms";}
 var lastStatus=null;
 var lastCfg="";
+// toasts: failure-spike + daemon disconnect/reconnect while the tab is open.
+// Throttled (one spike toast per 2 min) and capped at 4; the header
+// notice remains the persistent indicator, toasts are the nudge.
+var wasOk=null,failHist=[],lastSpike=0;
+function toast(msg,kind){
+var box=$("toasts");if(!box)return;
+while(box.children.length>=4)box.removeChild(box.firstChild);
+var d=document.createElement("div");d.className="toast "+(kind||"info");
+var s=document.createElement("span");s.textContent=msg;d.appendChild(s);
+var x=document.createElement("button");x.className="sub";x.textContent="dismiss";x.title="dismiss";x.onclick=function(){try{if(d.parentNode) d.parentNode.removeChild(d);}catch(e){}};d.appendChild(x);
+box.appendChild(d);
+setTimeout(function(){try{if(d.parentNode===box)box.removeChild(d);}catch(e){}},9000);
+}
+function failTotal(d){if(d.failure_total!=null)return +d.failure_total||0;var f=0,n=0;["failure_tcp","failure_udp","failure_socks","failure_forward_tcp","failure_forward_udp"].forEach(function(k){if(d[k]!=null){f+=+d[k]||0;n++;}});return n?f:null;}
+function checkSpike(d,now){
+var f=failTotal(d);if(f==null||document.hidden)return;
+failHist.push({t:now,f:f});while(failHist.length>1&&now-failHist[0].t>120000)failHist.shift();
+var base=failHist[0];
+for(var i=failHist.length-1;i>=0;i--){if(now-failHist[i].t>=45000){base=failHist[i];break;}}
+if(now-base.t<20000)return;
+var delta=f-base.f;
+if(delta>=10&&now-lastSpike>120000){lastSpike=now;toast("failure spike: +"+fmtInt(delta)+" failures in ~1 min","warn");}
+}
 function tick(d){
 lastStatus=d;
 setT("role",String(d.role||"unknown"));setT("uptime",(d.running?"● running · ":"○ stopped · ")+fmtDur(d.uptime_seconds));
@@ -386,11 +466,11 @@ setT("kcpSub","rto "+((rto==null||+rto<=0)?"—":fmtMs(rto))+" · cwnd "+((cwnd=
 $("bStart").disabled=!!d.running;$("bStop").disabled=!d.running;$("bRestart").disabled=false;
 histIn.push(rIn);histOut.push(rOut);
 if(histIn.length>MAX)histIn.shift();if(histOut.length>MAX)histOut.shift();
-renderSF(d);renderConns(d.connections);
+renderSF(d);renderConns(d.connections);checkSpike(d,now);
 if(!$("t-targets").classList.contains("hide"))renderTargets(d);
 draw();
 }
-function poll(){var s=++seq;if(document.hidden){setTimeout(poll,2000);return;}api("api/status",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(s!==seq)return;markOk(true,d.running);tick(d);}).catch(function(e){if(s!==seq)return;markOk(false,false,String((e&&e.message)||e));}).finally(function(){setTimeout(poll,2000);});}
+function poll(){var s=++seq;if(document.hidden){setTimeout(poll,2000);return;}api("api/status",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(s!==seq)return;if(wasOk===false&&!document.hidden)toast("reconnected to daemon","ok");wasOk=true;markOk(true,d.running);tick(d);}).catch(function(e){if(s!==seq)return;if(wasOk!==false&&!document.hidden)toast("daemon unreachable — retrying…","err");wasOk=false;markOk(false,false,String((e&&e.message)||e));}).finally(function(){setTimeout(poll,2000);});}
 function control(action){
 notice("");var b={start:$("bStart"),stop:$("bStop"),restart:$("bRestart")}[action];if(b)b.disabled=true;
 api("api/control",{method:"POST",body:JSON.stringify({action:action})}).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(o){
@@ -401,16 +481,93 @@ $("bStart").onclick=function(){control("start");};$("bStop").onclick=function(){
 // config sub-tabs
 document.querySelectorAll("button.sub[data-ct]").forEach(function(b){b.onclick=function(){document.querySelectorAll("button.sub[data-ct]").forEach(function(x){x.classList.toggle("on",x===b);});$("c-yaml").classList.toggle("hide",b.dataset.ct!=="yaml");$("c-form").classList.toggle("hide",b.dataset.ct!=="form");if(b.dataset.ct==="form"){loadIfaces(false);loadBackups();}};});
 var cfgLoaded=false;
-function loadCfg(force){api("api/config",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(!cfgLoaded||force||document.activeElement!==$("cfg")){$("cfg").value=d.yaml||"";lastCfg=d.yaml||"";fillForm(d.yaml||"");}setT("cfgPath2",d.path||"");cfgMsg("loaded "+(d.path||""),true);cfgLoaded=true;}).catch(function(e){cfgMsg("load failed: "+e.message,false);});}
+function loadCfg(force){api("api/config",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(!cfgLoaded||force||document.activeElement!==$("cfg")){$("cfg").value=d.yaml||"";lastCfg=d.yaml||"";fillForm(d.yaml||"");}setT("cfgPath2",d.path||"");cfgMsg("loaded "+(d.path||""),true);renderCfgErrs([]);refreshCfgDiff();cfgLoaded=true;}).catch(function(e){cfgMsg("load failed: "+e.message,false);});}
 function cfgMsg(m,ok){var e=$("cfgMsg");e.textContent=m;e.className="mono "+(ok?"ok":"err");}
 function formNote(m,warn){var e=$("formNote");e.textContent=m||"";e.className="note"+(warn?" warn":"");}
+// diff preview: unified line diff of textarea vs lastCfg with collapsed context,
+// plus parsed validation-error list from failed PUT.
+function splitCfgLines(s){s=String(s==null?"":s);if(s==="")return [];return s.split("\n");}
+function diffOps(a,b){
+var n=a.length,m=b.length,i,j;
+if(n*m>250000){
+var pre=0;while(pre<n&&pre<m&&a[pre]===b[pre])pre++;
+var sa=n-1,sb=m-1;while(sa>=pre&&sb>=pre&&a[sa]===b[sb]){sa--;sb--;}
+var ops=[];for(i=0;i<pre;i++)ops.push({t:" ",s:a[i]});
+for(i=pre;i<=sa;i++)ops.push({t:"-",s:a[i]});
+for(i=pre;i<=sb;i++)ops.push({t:"+",s:b[i]});
+for(i=sa+1;i<n;i++)ops.push({t:" ",s:a[i]});
+return ops;
+}
+var dp=new Array(n+1);for(i=0;i<=n;i++){dp[i]=new Array(m+1);for(j=0;j<=m;j++)dp[i][j]=0;}
+for(i=n-1;i>=0;i--)for(j=m-1;j>=0;j--)dp[i][j]=a[i]===b[j]?dp[i+1][j+1]+1:(dp[i+1][j]>=dp[i][j+1]?dp[i+1][j]:dp[i][j+1]);
+var ops2=[];i=0;j=0;
+while(i<n&&j<m){if(a[i]===b[j]){ops2.push({t:" ",s:a[i]});i++;j++;}else if(dp[i+1][j]>=dp[i][j+1]){ops2.push({t:"-",s:a[i]});i++;}else{ops2.push({t:"+",s:b[j]});j++;}}
+while(i<n){ops2.push({t:"-",s:a[i]});i++;}
+while(j<m){ops2.push({t:"+",s:b[j]});j++;}
+return ops2;
+}
+function parseCfgErrs(msg){
+msg=String(msg==null?"":msg).replace(/^\s*validation failed:?\s*/i,"");
+var lines=msg.split("\n"),out=[];
+for(var i=0;i<lines.length;i++){var t=lines[i].trim().replace(/^[-*\u2022]\s+/,"");if(!t)continue;out.push(t);}
+if(!out.length&&String(msg).trim())out=[String(msg).trim()];
+return out;
+}
+function renderCfgErrs(list){
+var ul=$("cfgErrs");if(!ul)return;
+while(ul.firstChild)ul.removeChild(ul.firstChild);
+if(!list||!list.length){ul.classList.add("hide");return;}
+ul.classList.remove("hide");
+for(var i=0;i<list.length&&i<20;i++){
+var li=document.createElement("li"),msg=String(list[i]);
+var m=msg.match(/^([\w.\-\[\]]+)\s+(.*)$/);
+if(m&&m[2]){var b=document.createElement("span");b.className="fld";b.textContent=m[1]+" ";li.appendChild(b);li.appendChild(document.createTextNode(m[2]));}
+else li.textContent=msg;
+ul.appendChild(li);
+}
+if(list.length>20){var more=document.createElement("li");more.textContent="\u2026 +"+(list.length-20)+" more";ul.appendChild(more);}
+}
+function renderCfgDiff(){
+var box=$("cfgDiff"),stats=$("cfgDiffStats");if(!box)return;
+while(box.firstChild)box.removeChild(box.firstChild);
+var oldL=splitCfgLines(lastCfg),newL=splitCfgLines($("cfg").value);
+var ops=diffOps(oldL,newL),adds=0,dels=0,changed=[];
+for(var i=0;i<ops.length;i++){if(ops[i].t==="+"){adds++;changed.push(i);}else if(ops[i].t==="-"){dels++;changed.push(i);}}
+if(!changed.length){
+if(stats)stats.textContent="no changes";
+var none=document.createElement("div");none.className="dl none";none.textContent="no changes \u2014 working copy matches last loaded/saved config";box.appendChild(none);
+return;
+}
+var CTX=3,wins=[];
+for(var c=0;c<changed.length;c++){var s=Math.max(0,changed[c]-CTX),e=Math.min(ops.length-1,changed[c]+CTX);if(wins.length&&s<=wins[wins.length-1][1]+1){if(e>wins[wins.length-1][1])wins[wins.length-1][1]=e;}else wins.push([s,e]);}
+if(stats)stats.textContent="+"+adds+" \u2212"+dels+" \u00b7 "+ops.length+" lines \u00b7 "+wins.length+" hunk"+(wins.length===1?"":"s");
+var oldNo=1,newNo=1,idx=0;
+for(var w=0;w<wins.length;w++){
+var a=wins[w][0],b=wins[w][1];
+while(idx<a){if(ops[idx].t===" ")oldNo++;else if(ops[idx].t==="-")oldNo++;else newNo++;idx++;}
+var h=document.createElement("div");h.className="dl hunk";h.textContent="@@-"+oldNo+","+(b-a+1)+" +"+newNo+","+(b-a+1)+" @@";box.appendChild(h);
+for(var k=a;k<=b;k++){
+var d=document.createElement("div"),sgn=document.createElement("span"),txt=document.createElement("span");
+sgn.className="sgn";sgn.textContent=ops[k].t;d.appendChild(sgn);txt.textContent=ops[k].s;d.appendChild(txt);
+d.className="dl "+(ops[k].t==="+"?"add":ops[k].t==="-"?"del":"ctx");
+box.appendChild(d);
+if(ops[k].t===" ") {oldNo++;newNo++;} else if(ops[k].t==="-") oldNo++; else newNo++;
+idx++;
+}
+}
+}
+function cfgDiffVisible(){var w=$("cfgDiffWrap");return !!(w&&!w.classList.contains("hide"));}
+function refreshCfgDiff(){if(cfgDiffVisible())renderCfgDiff();}
 function saveCfg(restart){
-cfgMsg("saving…",true);
-api("api/config",{method:"PUT",body:JSON.stringify({yaml:$("cfg").value})}).then(function(r){return r.json().then(function(j){return {ok:r.ok,st:r.status,j:j};});}).then(function(o){
-if(o.ok){cfgMsg("saved — restart to apply",true);lastCfg=$("cfg").value;if(restart)control("restart");}
-else{cfgMsg("validation failed: "+(o.j.error||("http "+o.st)),false);}}).catch(function(e){cfgMsg("save failed: "+e.message,false);});
+cfgMsg("saving…",true);renderCfgErrs([]);
+api("api/config",{method:"PUT",body:JSON.stringify({yaml:$("cfg").value})}).then(function(r){return r.text().then(function(t){var j=null;try{j=JSON.parse(t);}catch(e){}return {ok:r.ok,st:r.status,j:j,raw:t};});}).then(function(o){
+if(o.ok){cfgMsg("saved — restart to apply",true);lastCfg=$("cfg").value;renderCfgErrs([]);refreshCfgDiff();if(restart)control("restart");}
+else{var msg=((o.j&&o.j.error)||o.raw||("http "+o.st));var pre=/^\s*validation failed/i.test(msg)?"":"validation failed: ";cfgMsg(pre+msg,false);renderCfgErrs(parseCfgErrs(msg));refreshCfgDiff();}}).catch(function(e){cfgMsg("save failed: "+e.message,false);});
 }
 $("bCfgLoad").onclick=function(){loadCfg(true);};$("bCfgSave").onclick=function(){saveCfg(false);};$("bCfgSaveRestart").onclick=function(){saveCfg(true);};
+$("bCfgDiff").onclick=function(){try{if(!$("c-form").classList.contains("hide")){if(applyFormToYaml()==null)return;}}catch(e){}var w=$("cfgDiffWrap");if(!w)return;var show=w.classList.contains("hide");w.classList.toggle("hide",!show);try{$("bCfgDiff").setAttribute("aria-expanded",show?"true":"false");}catch(e){}if(show)renderCfgDiff();};
+$("bCfgDiffHide").onclick=function(){var w=$("cfgDiffWrap");if(w)w.classList.add("hide");try{$("bCfgDiff").setAttribute("aria-expanded","false");}catch(e){}};
+try{$("cfg").addEventListener("input",function(){refreshCfgDiff();});}catch(e){}
 // form: indent-aware nested YAML get/set (no YAML lib on page), plus
 // list-section editors for socks5/forward.
 function yStripVal(v){v=String(v==null?"":v).trim();if(!v||v[0]==="#")return "";if(v[0]==='"'||v[0]==="'"){var q=v[0],e=v.indexOf(q,1);return e>0?v.slice(1,e):v.slice(1);}var h=v.search(/\s+#/);if(h>=0)v=v.slice(0,h).trim();return v.replace(/^["']|["']$/g,"");}
@@ -693,6 +850,39 @@ function diagSay(s){var e=$("diagOut");if(e)e.textContent=s;}
 $("bPing").onclick=function(){diagSay("ping…");api("api/diag/ping",{method:"POST",body:JSON.stringify({}),cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("ping endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(t){diagSay("ping ok:\n"+t);}).catch(function(e){diagSay("ping: "+e.message+" — endpoint may not exist; continuing.");});};
 $("bFw").onclick=function(){var p=($("fwPort").value||"").trim();if(!p){diagSay("enter a port first.");return;}diagSay("firewall check on port "+p+"…");api("api/net/firewall?port="+encodeURIComponent(p),{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("firewall endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(t){diagSay("firewall port "+p+":\n"+t);}).catch(function(e){diagSay("firewall check: "+e.message+" — endpoint may not exist; continuing.");});};
 $("bIfaces").onclick=function(){loadIfaces(false).then(function(l){diagSay(l.length?("interfaces: "+l.length+" found (see table)"):"interfaces: none reported");});};
+function lstNote(m,warn){var e=$("lstNote");if(!e)return;e.textContent=m||"";e.className="note"+(warn?" warn":"");}
+function parseListeners(d){if(!d)return [];if(Array.isArray(d))return d;if(Array.isArray(d.listeners))return d.listeners;if(Array.isArray(d.data))return d.data;return [];}
+function lstDetail(it){if(typeof it==="string")return "";var parts=[];if(it.type)parts.push(String(it.type));var l=it.listen||it.addr||"";if(l)parts.push(String(l));var t=it.target||"";if(t)parts.push("→ "+t);var p=it.protocol||"";if(p)parts.push(String(p));return parts.join(" · ");}
+function renderListeners(list){
+var tb=$("lstBody");if(!tb)return;while(tb.firstChild)tb.removeChild(tb.firstChild);
+$("lstEmpty").style.display=list.length?"none":"block";
+list.slice(0,200).forEach(function(it){
+var tr=document.createElement("tr");
+var nm=typeof it==="string"?it:(it.id||it.name||"?");
+var tdN=document.createElement("td");tdN.textContent=nm;tdN.className="mono";tr.appendChild(tdN);
+var tdD=document.createElement("td");tdD.textContent=lstDetail(it);tdD.className="mono";tr.appendChild(tdD);
+var tdS=document.createElement("td");
+var hasState=it&&typeof it==="object"&&typeof it.running==="boolean";
+tdS.textContent=hasState?(it.running?"running":"stopped"):"—";
+tdS.className=hasState?(it.running?"st-active":"st-closed"):"st-closed";
+tr.appendChild(tdS);
+var tdA=document.createElement("td");
+if(hasState){
+var b=document.createElement("button");b.className="sub";b.textContent=it.running?"Stop":"Start";
+b.onclick=(function(id,act){return function(){listenerAction(id,act);};})(nm,it.running?"stop":"start");
+tdA.appendChild(b);
+}else{tdA.textContent="—";tdA.className="mono";}
+tr.appendChild(tdA);
+tb.appendChild(tr);
+});
+}
+function loadListeners(){lstNote("");return api("api/listeners",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listeners endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var list=parseListeners(d);renderListeners(list);if(!list.length)lstNote("no listeners reported");return list;}).catch(function(e){renderListeners([]);lstNote("listeners: "+e.message+" — continuing",true);return [];});}
+function listenerAction(id,action){lstNote(action+" "+id+"…");api("api/listeners/"+encodeURIComponent(id)+"/"+action,{method:"POST",cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listener control unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(){lstNote(action+" ok: "+id);loadListeners();}).catch(function(e){lstNote(action+" "+id+": "+e.message+" — continuing",true);});}
+$("bLstRefresh").onclick=function(){loadListeners();};
+function logLvlNote(m,warn){var e=$("logLvlNote");if(!e)return;e.textContent=m||"";e.className="note"+(warn?" warn":"");}
+function loadLogLevel(){return api("api/log",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("log level endpoint unavailable");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var lv=String((d&&d.level)||"").toLowerCase();var sel=$("logSetLevel");if(sel&&lv){for(var i=0;i<sel.options.length;i++)if(sel.options[i].value===lv){sel.value=lv;break;}}return lv;}).catch(function(){return "";});}
+$("bLogSet").onclick=function(){var lv=$("logSetLevel").value;if(!lv){logLvlNote("pick a level first",true);return;}logLvlNote("setting…");api("api/log",{method:"POST",body:JSON.stringify({level:lv}),cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(){logLvlNote("level: "+lv);pollLogs();}).catch(function(e){logLvlNote("set level: "+e.message,true);});};
+$("bDump").onclick=function(){var p=($("fwPort").value||"").trim()||"9999";diagSay("dump capture on port "+p+"…");api("api/diag/dump",{method:"POST",body:JSON.stringify({port:parseInt(p,10)||9999,count:10}),cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("dump endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(t){diagSay("dump port "+p+":\n"+t);try{var b=new Blob([t],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="paqet-dump-"+p+".json";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);}catch(e){}}).catch(function(e){diagSay("dump: "+e.message+" — endpoint may not exist; continuing.");});};
 $("q").addEventListener("input",applyFilter);
 fitCanvas();poll();sseInit();
 </script>
