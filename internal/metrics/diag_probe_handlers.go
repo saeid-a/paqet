@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +55,33 @@ func releaseProbe() {
 	}
 }
 
+// probeHistory is the shared last-20 probe result ring.
+var probeHistory = diag.NewHistory()
+
+// recordProbe stores one entry; label is the UI's before/after tag.
+func recordProbe(kind, label, summary string, payload any) {
+	probeHistory.Record(kind, label, summary, payload)
+}
+
+// diagResultsHandler serves GET /api/diag/results.
+func diagResultsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	entries := probeHistory.List()
+	if entries == nil {
+		entries = []diag.ProbeEntry{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method == http.MethodHead {
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"entries": entries, "count": len(entries)})
+}
+
 // diagDialHandler serves POST /api/diag/dial.
 func diagDialHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -72,6 +100,7 @@ func diagDialHandler(w http.ResponseWriter, r *http.Request) {
 		Host       string `json:"host"`
 		Port       int    `json:"port"`
 		TimeoutSec int    `json:"timeout_sec"`
+		Label      string `json:"label"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -106,6 +135,11 @@ func diagDialHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	res, _ := v.(diag.DialResult)
 	flog.Auditf("diag dial %s:%d from %s ok=%v err=%q", host, req.Port, remoteIP(r), res.OK, res.Error)
+	summary := "fail: " + res.Error
+	if res.OK {
+		summary = "ok " + strconv.FormatInt(res.ConnectMs, 10) + "ms"
+	}
+	recordProbe("dial", req.Label, host+":"+strconv.Itoa(req.Port)+" "+summary, res)
 	writeDiagJSON(w, res)
 }
 
@@ -129,6 +163,7 @@ func diagUDPHandler(w http.ResponseWriter, r *http.Request) {
 		TimeoutSec int    `json:"timeout_sec"`
 		Bytes      int    `json:"bytes"`
 		NBytes     int    `json:"nbytes"`
+		Label      string `json:"label"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -167,6 +202,13 @@ func diagUDPHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	res, _ := v.(diag.UDPResult)
 	flog.Auditf("diag udp %s:%d from %s ok=%v err=%q note=%q", host, req.Port, remoteIP(r), res.OK, res.Error, res.Note)
+	summary := "no echo"
+	if res.OK {
+		summary = "echo " + strconv.FormatInt(res.RttMs, 10) + "ms"
+	} else if res.Error != "" {
+		summary = "fail: " + res.Error
+	}
+	recordProbe("udp", req.Label, host+":"+strconv.Itoa(req.Port)+" "+summary, res)
 	writeDiagJSON(w, res)
 }
 
@@ -200,8 +242,9 @@ func diagMTUHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8192)
 	var req struct {
-		Host string `json:"host"`
-		Port int    `json:"port"`
+		Host  string `json:"host"`
+		Port  int    `json:"port"`
+		Label string `json:"label"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -236,6 +279,11 @@ func diagMTUHandler(w http.ResponseWriter, r *http.Request) {
 	res, _ := v.(diag.MTUResult)
 	res.KCPMTU = probeKCPMTU()
 	flog.Auditf("diag mtu %s:%d from %s iface=%d kcp=%d probe=%d", host, req.Port, remoteIP(r), res.InterfaceMTU, res.KCPMTU, res.ProbeMTU)
+	summary := "iface " + strconv.Itoa(res.InterfaceMTU) + " kcp " + strconv.Itoa(res.KCPMTU)
+	if res.ProbeMTU > 0 {
+		summary += " probe " + strconv.Itoa(res.ProbeMTU)
+	}
+	recordProbe("mtu", req.Label, host+":"+strconv.Itoa(req.Port)+" "+summary, res)
 	writeDiagJSON(w, res)
 }
 
@@ -258,6 +306,7 @@ func diagSpeedtestHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DurationSec int    `json:"duration_sec"`
 		Mode        string `json:"mode"`
+		Label       string `json:"label"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -303,5 +352,7 @@ func diagSpeedtestHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	res, _ := v.(diag.SpeedtestResult)
 	flog.Auditf("diag speedtest from %s mode=%s dur=%d up=%d down=%d mbps=%.2f", remoteIP(r), mode, res.DurationSec, res.BytesUp, res.BytesDown, res.GoodputMbps)
+	summary := mode + " " + strconv.FormatFloat(res.GoodputMbps, 'f', 2, 64) + " Mbps up " + strconv.FormatUint(res.BytesUp, 10) + " down " + strconv.FormatUint(res.BytesDown, 10)
+	recordProbe("speedtest", req.Label, summary, res)
 	writeDiagJSON(w, res)
 }

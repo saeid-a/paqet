@@ -58,3 +58,15 @@ func TestDiagSpeedtestRejectsBadMode(t *testing.T) {
 		t.Fatalf("want 400, got %d", rec.Code)
 	}
 }
+
+func TestDiagResultsListsEntries(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/diag/results", nil)
+	rec := httptest.NewRecorder()
+	diagResultsHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"entries"`) {
+		t.Fatal("missing entries key")
+	}
+}
