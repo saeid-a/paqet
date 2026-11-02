@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>paqet status</title>
+<link rel="icon" href="data:,">
 <style>
 :root{--bg:#0b0e14;--panel:#131824;--line:#232c40;--fg:#dbe2f1;--dim:#8b94a9;--grn:#34d399;--red:#f87171;--blu:#60a5fa;--cyn:#22d3ee}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -52,8 +53,8 @@ footer{color:var(--dim);font-size:11px;text-align:center;padding:6px}
 <div class="grid">
 <div class="card"><div class="k">Throughput in</div><div class="v num" id="tIn">—</div><div class="s num" id="tInTot">—</div></div>
 <div class="card"><div class="k">Throughput out</div><div class="v num" id="tOut">—</div><div class="s num" id="tOutTot">—</div></div>
-<div class="card"><div class="k">Packets in</div><div class="v num" id="pIn">—</div><div class="s">total</div></div>
-<div class="card"><div class="k">Packets out</div><div class="v num" id="pOut">—</div><div class="s">total</div></div>
+<div class="card"><div class="k">Packets in</div><div class="v num" id="pIn">—</div><div class="s num" id="pInR">—</div></div>
+<div class="card"><div class="k">Packets out</div><div class="v num" id="pOut">—</div><div class="s num" id="pOutR">—</div></div>
 <div class="card"><div class="k">Active conns</div><div class="v num" id="aConn">—</div><div class="s">connections</div></div>
 <div class="card"><div class="k">Active streams</div><div class="v num" id="aStr">—</div><div class="s">streams</div></div>
 </div>
@@ -75,7 +76,7 @@ footer{color:var(--dim);font-size:11px;text-align:center;padding:6px}
 
 <script>
 "use strict";
-var histIn=[],histOut=[],MAX=60;
+var histIn=[],histOut=[],MAX=60,prev=null;
 var $=function(id){return document.getElementById(id);};
 function setT(id,t){$(id).textContent=t;}
 function fmtInt(n){n=+n||0;return n.toLocaleString("en-US");}

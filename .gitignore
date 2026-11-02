@@ -58,3 +58,4 @@ xray
 geoip.dat
 warp/
 .wg/
+.build/
