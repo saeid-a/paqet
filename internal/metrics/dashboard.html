@@ -394,7 +394,7 @@ window.addEventListener("hashchange",function(){var h=tabFromHash();if(h)showTab
 document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=7)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
 // modal drawer
 var connHist={};
-function trackConnHist(now){now=+now||Date.now();var seen={};(connCache||[]).forEach(function(c){var k=connId(c);seen[k]=1;var h=connHist[k]||(connHist[k]={rtt:[],rin:[],rout:[]});var r=connRtt(c);if(r!=null)h.rtt.push(r);h.rin.push(+c._rin||0);h.rout.push(+c._rout||0);if(h.rtt.length>MAX)h.rtt.shift();if(h.rin.length>MAX)h.rin.shift();if(h.rout.length>MAX)h.rout.shift();});Object.keys(connHist).forEach(function(k){if(!seen[k])delete connHist[k];});}
+function trackConnHist(now){now=+now||Date.now();var seen={};(connCache||[]).forEach(function(c){var k=connId(c);seen[k]=1;var h=connHist[k]||(connHist[k]={rtt:[],rin:[],rout:[]});var r=connRtt(c);if(r!=null)h.rtt.push(r);h.rin.push(+c._rin||0);h.rout.push(+c._rout||0);if(h.rtt.length>MAX)h.rtt.shift();if(h.rin.length>MAX)h.rin.shift();if(h.rout.length>MAX)h.rout.shift();});try{(connGone||[]).forEach(function(g){seen[g.key||connId(g)]=1;});}catch(e){}Object.keys(connHist).forEach(function(k){if(!seen[k])delete connHist[k];});}
 function modalHistText(c){c=c||{};var k=connId(c),h=connHist[k]||{rtt:[],rin:[],rout:[]};var rs=(h.rtt||[]).slice(-20),mn=null,mx=null;for(var i=0;i<rs.length;i++){if(mn==null||rs[i]<mn)mn=rs[i];if(mx==null||rs[i]>mx)mx=rs[i];}var last=rs.length?rs[rs.length-1]:connRtt(c);var closed=c.closedAt?"closed":"active";var lines=["status: "+closed+" · id "+c.id+" · "+(c.remote_addr||"?")+" -> "+(c.local_addr||"?")];lines.push("lifetime in "+fmtBytes(c.bytes_in)+" / out "+fmtBytes(c.bytes_out)+" · uptime "+fmtDur(c.uptime_seconds)+" · streams "+c.active_streams);lines.push("rtt last "+(last==null?"—":fmtMs(last))+" · min "+(mn==null?"—":fmtMs(mn))+" · max "+(mx==null?"—":fmtMs(mx))+" ("+rs.length+" samples)");lines.push("rin last "+fmtRate((h.rin||[]).length?(h.rin[h.rin.length-1]||0):(c._rin||0))+" · rout last "+fmtRate((h.rout||[]).length?(h.rout[h.rout.length-1]||0):(c._rout||0)));return lines.join("\n");}
 function openModal(c){setT("modalBody",JSON.stringify(c,null,2));var el=$("modalHist");if(el)el.textContent=modalHistText(c);$("modal").classList.remove("hide");}
 $("modalX").onclick=function(){$("modal").classList.add("hide");};
@@ -524,8 +524,8 @@ var hasT=sq!=null||rq!=null||sb!=null||ns!=null||nc!=null||fill!=null||rtx!=null
 if(!hasT){setT("trQueues","—");setT("trStreams","—");setT("trHint","no data");return;}
 setT("trQueues","snd_q "+((sq==null||isNaN(+sq))?"—":fmtInt(sq))+" · rcv_q "+((rq==null||isNaN(+rq))?"—":fmtInt(rq))+" · snd_buf "+((sb==null||isNaN(+sb))?"—":fmtInt(sb)));
 setT("trStreams","streams "+((ns==null||isNaN(+ns))?"—":fmtInt(ns))+" · conns "+((nc==null||isNaN(+nc))?"—":fmtInt(nc))+" · fill "+((fill==null||isNaN(+fill))?"—":fmtInt(fill))+"/"+((cap==null||isNaN(+cap))?"—":fmtInt(cap))+" · retx "+((rtx==null||isNaN(+rtx))?"—":fmtInt(rtx))+" · lost "+((lost==null||isNaN(+lost))?"—":fmtInt(lost))+" · fec "+((fec==null||isNaN(+fec))?"—":fmtInt(fec)));
-var hint="no data",q=(+sq||0)+(+rq||0);
-try{var cwnd=+pick(kcp,"cwnd","snd_wnd","wnd",0)||0;if(q>0&&cwnd<=0)hint="congestion suspect — rising queue, cwnd flat";else if(q>0)hint="queue building — watch cwnd + loss";else if(q===0)hint="queues clear";}catch(e){hint="no data";}
+var hint="no data",q=(+sq||0)+(+rq||0),hasQ=sq!=null&&rq!=null;
+try{var cwnd=+pick(kcp,"cwnd","snd_wnd","wnd",0)||0;if(!hasQ)hint="no data";else if(q>0&&cwnd<=0)hint="congestion suspect — rising queue, cwnd flat";else if(q>0)hint="queue building — watch cwnd + loss";else if(q===0)hint="queues clear";}catch(e){hint="no data";}
 setT("trHint",hint);
 }
 // toasts: failure-spike + daemon disconnect/reconnect while the tab is open.

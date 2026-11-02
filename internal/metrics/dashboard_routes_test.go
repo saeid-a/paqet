@@ -153,6 +153,7 @@ func TestDashboardHasTransportPressure(t *testing.T) {
     for _, want := range []string{`id="trQueues"`, `id="trHint"`, "renderTransport", "snd_queue", "target_fill", "no data"} {
         if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
     }
+    if strings.Contains(s, "innerHTML") { t.Fatal("dashboard must not use innerHTML (XSS)") }
 }
 
 func TestDashboardHasConnHistory(t *testing.T) {
@@ -161,4 +162,12 @@ func TestDashboardHasConnHistory(t *testing.T) {
     for _, want := range []string{`id="modalHist"`, "trackConnHist", "connHist", "closedAt", "textContent"} {
         if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
     }
+    if strings.Contains(s, "innerHTML") { t.Fatal("dashboard must not use innerHTML (XSS)") }
+    if !strings.Contains(s, "(connGone||[])") { t.Fatal("trackConnHist must retain tombstones via connGone") }
+}
+
+func TestDashboardTransportHintGuardsMissingQueues(t *testing.T) {
+    html, _ := os.ReadFile("dashboard.html")
+    s := string(html)
+    if !strings.Contains(s, "sq!=null&&rq!=null") { t.Fatal("renderTransport must guard missing snd_queue/rcv_queue before claiming queues clear") }
 }
