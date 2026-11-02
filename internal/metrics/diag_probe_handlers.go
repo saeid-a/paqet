@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -154,6 +155,87 @@ func diagDialHandler(w http.ResponseWriter, r *http.Request) {
 	writeDiagJSON(w, res)
 }
 
+// diagTunnelHandler serves POST /api/diag/tunnel: dial target through the
+// tunnel (client role) instead of directly. Forward targets are dialed by
+// the server, so a direct probe from this host proves nothing for
+// server-side targets; this probe exercises the real path and classifies
+// it via the stream read-hold signal (see client.ProbeTarget).
+func diagTunnelHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	c := getController()
+	if c.TunnelProbe == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotImplemented)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "tunnel probe unavailable (server role or core down)"})
+		return
+	}
+	if !tryAcquireProbe() {
+		w.Header().Set("Retry-After", "5")
+		writeProbeJSONError(w, http.StatusTooManyRequests, "too many probes")
+		return
+	}
+	defer releaseProbe()
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	var req struct {
+		Target     string `json:"target"`
+		TimeoutSec int    `json:"timeout_sec"`
+		Label      string `json:"label"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	target := strings.TrimSpace(req.Target)
+	if target == "" || len(target) > 253 {
+		http.Error(w, "missing target", http.StatusBadRequest)
+		return
+	}
+	host, portStr, err := net.SplitHostPort(target)
+	if err != nil || strings.TrimSpace(host) == "" {
+		http.Error(w, "invalid target (want host:port)", http.StatusBadRequest)
+		return
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(portStr))
+	if err != nil || port < 1 || port > 65535 {
+		http.Error(w, "invalid port (want 1-65535)", http.StatusBadRequest)
+		return
+	}
+	timeoutSec := req.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = 10
+	}
+	if timeoutSec > 15 {
+		timeoutSec = 15
+	}
+	var ms int64
+	var spoke bool
+	var perr error
+	_, ok := runDiagWithTimeout(r.Context(), time.Duration(timeoutSec+2)*time.Second, func() any {
+		ms, spoke, perr = c.TunnelProbe(r.Context(), target, timeoutSec)
+		return true
+	})
+	if !ok {
+		http.Error(w, "tunnel probe timed out", http.StatusGatewayTimeout)
+		return
+	}
+	if perr != nil {
+		flog.Auditf("diag tunnel %s from %s ok=%v err=%q", target, remoteIP(r), false, perr.Error())
+		recordProbe("tunnel", req.Label, target+" fail: "+perr.Error(), map[string]any{"target": target, "ok": false, "error": perr.Error()})
+		writeDiagJSON(w, map[string]any{"target": target, "ok": false, "error": perr.Error()})
+		return
+	}
+	summary := "held " + strconv.FormatInt(ms, 10) + "ms"
+	if spoke {
+		summary = "banner " + strconv.FormatInt(ms, 10) + "ms"
+	}
+	flog.Auditf("diag tunnel %s from %s ok=%v ms=%d spoke=%v", target, remoteIP(r), true, ms, spoke)
+	recordProbe("tunnel", req.Label, target+" "+summary, map[string]any{"target": target, "ok": true, "connect_ms": ms, "spoke": spoke})
+	writeDiagJSON(w, map[string]any{"target": target, "ok": true, "connect_ms": ms, "spoke": spoke})
+}
 // diagUDPHandler serves POST /api/diag/udp.
 func diagUDPHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

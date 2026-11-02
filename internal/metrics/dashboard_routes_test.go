@@ -187,8 +187,9 @@ func TestDashboardForwardTestButton(t *testing.T) {
 	html, _ := os.ReadFile("dashboard.html")
 	s := string(html)
 	// Buttons are created via setAttribute in inline JS, so assert on the
-	// call form rather than literal HTML attributes.
-	for _, want := range []string{"listenerTest", "api/diag/dial", `"data-testid"`, `"fwd-test"`, `"fwd-test-result"`, "textContent"} {
+	// call form rather than literal HTML attributes. The test runs through
+	// the tunnel, not a direct dial: forward targets are dialed by the server.
+	for _, want := range []string{"listenerTest", "api/diag/tunnel", `"data-testid"`, `"fwd-test"`, `"fwd-test-result"`, "textContent", "through the tunnel"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q", want)
 		}
@@ -210,5 +211,24 @@ func TestDashboardForwardSelect(t *testing.T) {
 	}
 	if strings.Contains(s, "innerHTML") {
 		t.Fatal("select path must not use innerHTML (XSS)")
+	}
+}
+
+func TestDashboardListenersLiveInConfig(t *testing.T) {
+	html, _ := os.ReadFile("dashboard.html")
+	s := string(html)
+	// The Listeners panel (with the forward Test/Use workflow) lives in the
+	// Config tab, not Targets: the table markup must sit inside t-config.
+	cfg := strings.Index(s, `id="t-config"`)
+	tbl := strings.Index(s, `id="lstBody"`)
+	if cfg < 0 || tbl < 0 || tbl < cfg {
+		t.Fatalf("Listeners table not inside Config tab (cfg=%d tbl=%d)", cfg, tbl)
+	}
+	// Targets tab renders targets only; it must not trigger a listener load.
+	if !strings.Contains(s, `if(t==="targets"){if(lastStatus)renderTargets(lastStatus);}`) {
+		t.Fatal("targets tab should render targets without loading listeners")
+	}
+	if !strings.Contains(s, `if(t==="config"){loadCfg(false);loadListeners();}`) {
+		t.Fatal("config tab should load config and listeners")
 	}
 }

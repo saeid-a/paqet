@@ -38,6 +38,9 @@ type Controller struct {
 	ListenerStop    func(id string) error
 	ListenerRunning func(id string) bool
 	Drain           func(timeoutSec int) error
+	// TunnelProbe dials target through the tunnel (client role). If nil,
+	// the tunnel probe endpoint returns 501.
+	TunnelProbe func(ctx context.Context, target string, timeoutSec int) (ms int64, spoke bool, err error)
 }
 
 var (
@@ -228,6 +231,7 @@ func StartWithController(ctx context.Context, cfg conf.Admin, c Controller) {
 	mux.HandleFunc("/api/diag/ping", requireAuth(diagPingHandler))
 	mux.HandleFunc("/api/diag/dump", requireAuth(diagDumpHandler))
 	mux.HandleFunc("/api/diag/dial", requireAuth(diagDialHandler))
+	mux.HandleFunc("/api/diag/tunnel", requireAuth(diagTunnelHandler))
 	mux.HandleFunc("/api/diag/udp", requireAuth(diagUDPHandler))
 	mux.HandleFunc("/api/diag/mtu", requireAuth(diagMTUHandler))
 	mux.HandleFunc("/api/diag/speedtest", requireAuth(diagSpeedtestHandler))

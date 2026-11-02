@@ -206,14 +206,14 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="row"><button id="bCsv">Export CSV</button><span class="note" id="tgtNote"></span></div>
 <div class="wrap"><table><thead><tr><th>target</th><th class="n">in</th><th class="n">out</th><th class="n">success</th><th class="n">fail</th><th>success-rate</th><th>avg-rtt</th><th>health</th></tr></thead><tbody id="tgtBody"></tbody></table>
 <div class="empty" id="tgtEmpty">no targets</div></div></div>
+</section>
+
+<section id="t-config" class="hide">
 <div class="panel"><h2>Listeners</h2>
 <div class="note hide" id="fwdActive" data-testid="fwd-active"></div>
 <div class="row"><button id="bLstRefresh">Refresh</button><span class="note" id="lstNote"></span></div>
 <div class="wrap"><table><thead><tr><th>listener</th><th>detail</th><th>state</th><th>action</th><th>test</th></tr></thead><tbody id="lstBody"></tbody></table>
 <div class="empty" id="lstEmpty">no listener data — open this tab to load</div></div></div>
-</section>
-
-<section id="t-config" class="hide">
 <div class="panel"><h2>Config <span class="mono" id="cfgPath2"></span></h2>
 <div class="row">
 <button class="sub on" data-ct="yaml">YAML</button>
@@ -407,7 +407,7 @@ function api(p,o){o=o||{};o.headers=authH(o.headers||{});return fetch(p,o);}
 var TABS=["overview","conns","targets","config","logs","diag","setup"];
 var tabs=document.querySelectorAll("button.tab");
 function tabFromHash(){try{var h=String(location.hash||"").replace(/^#\/?/,"").split("?")[0];if(TABS.indexOf(h)>=0)return h;}catch(e){}return null;}
-function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();loadAudit();}if(t==="diag"){loadIfaces(true);try{loadProbeHistory();}catch(e){}}if(t==="setup"){loadPreflight();loadPosture();}if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview"){loadPosture();loadRuntime();}try{if(tabFromHash()!==t)location.hash=t;}catch(e){}}
+function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config"){loadCfg(false);loadListeners();}if(t==="logs"){pollLogs();loadLogLevel();loadAudit();}if(t==="diag"){loadIfaces(true);try{loadProbeHistory();}catch(e){}}if(t==="setup"){loadPreflight();loadPosture();}if(t==="targets"){if(lastStatus)renderTargets(lastStatus);}if(t==="overview"){loadPosture();loadRuntime();}try{if(tabFromHash()!==t)location.hash=t;}catch(e){}}
 tabs.forEach(function(b){b.onclick=function(){showTab(b.dataset.t);};});
 window.addEventListener("hashchange",function(){var h=tabFromHash();if(h)showTab(h);});
 document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=7)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
@@ -1131,8 +1131,8 @@ function lstNote(m,warn){var e=$("lstNote");if(!e)return;e.textContent=m||"";e.c
 function parseListeners(d){if(!d)return [];if(Array.isArray(d))return d;if(Array.isArray(d.listeners))return d.listeners;if(Array.isArray(d.data))return d.data;return [];}
 function lstDetail(it){if(typeof it==="string")return "";var parts=[];if(it.type)parts.push(String(it.type));var l=it.listen||it.addr||"";if(l)parts.push(String(l));var t=it.target||"";if(t)parts.push("→ "+t);var p=it.protocol||"";if(p)parts.push(String(p));return parts.join(" · ");}
 function parseFwdTarget(t){t=String(t==null?"":t);var i=t.lastIndexOf(":");if(i<=0)return null;var h=t.slice(0,i).replace(/^\[/,"").replace(/\]$/,""),p=parseInt(t.slice(i+1),10);if(!h||isNaN(p)||p<1||p>65535)return null;return{host:h,port:p};}
-function listenerTest(id,target,btn,el){var t=parseFwdTarget(target);if(!t||!el)return;if(btn)btn.disabled=true;el.textContent="testing…";
-api("api/diag/dial",{method:"POST",body:JSON.stringify({host:t.host,port:t.port,timeout_sec:5,label:"forward "+id}),cache:"no-store"}).then(function(r){if(r.status===409||r.status===429){return r.json().then(function(d){throw new Error((d&&d.error)||("busy (http "+r.status+")"));});}if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){el.textContent=(d&&d.ok)?("ok "+(d.connect_ms==null?"?":d.connect_ms)+"ms"):("fail: "+((d&&d.error)||"unknown"));try{loadProbeHistory();}catch(e){}}).catch(function(e){el.textContent="fail: "+String((e&&e.message)||e);}).finally(function(){if(btn)btn.disabled=false;});}
+function listenerTest(id,target,btn,el){var t=parseFwdTarget(target);if(!t||!el)return;if(btn)btn.disabled=true;el.textContent="testing via tunnel…";
+api("api/diag/tunnel",{method:"POST",body:JSON.stringify({target:String(target),timeout_sec:10,label:"forward "+id}),cache:"no-store"}).then(function(r){if(r.status===409||r.status===429){return r.json().then(function(d){throw new Error((d&&d.error)||("busy (http "+r.status+")"));});}if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(d&&d.ok){el.textContent="ok "+(d.connect_ms==null?"?":d.connect_ms)+"ms"+(d.spoke?" (banner)":" (held)");}else{el.textContent="fail: "+((d&&d.error)||"unknown");}try{loadProbeHistory();}catch(e){}}).catch(function(e){el.textContent="fail: "+String((e&&e.message)||e);}).finally(function(){if(btn)btn.disabled=false;});}
 function renderListeners(list){
 var tb=$("lstBody");if(!tb)return;while(tb.firstChild)tb.removeChild(tb.firstChild);
 $("lstEmpty").style.display=list.length?"none":"block";
@@ -1163,7 +1163,7 @@ tr.appendChild(tdA);
 var tdT=document.createElement("td");
 if(it&&typeof it==="object"&&String(it.type||"")==="forward"){
 var tgt=String(it.target||""),pt=parseFwdTarget(tgt);
-var tb2=document.createElement("button");tb2.className="sub";tb2.textContent="Test";
+var tb2=document.createElement("button");tb2.className="sub";tb2.textContent="Test";tb2.title="test target through the tunnel";
 tb2.setAttribute("data-testid","fwd-test");tb2.setAttribute("data-id",nm);
 var rs=document.createElement("div");rs.setAttribute("data-testid","fwd-test-result");rs.setAttribute("data-id",nm);rs.className="mono";
 if(!pt){tb2.disabled=true;tb2.title="unparsable target "+(tgt||"(empty)");rs.textContent="—";}

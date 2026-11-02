@@ -23,6 +23,9 @@ func startClient(cfg *conf.Conf) {
 		if err != nil {
 			return err
 		}
+		sup.setTunnelProbe(func(ctx context.Context, target string, timeout time.Duration) (int64, bool, error) {
+			return cl.ProbeTarget(ctx, target, timeout)
+		})
 		if err := cl.Start(coreCtx); err != nil {
 			return err
 		}

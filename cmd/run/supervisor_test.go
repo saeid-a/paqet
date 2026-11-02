@@ -75,3 +75,31 @@ transport:
 		t.Fatal("supervisor reports running after cancelled start")
 	}
 }
+
+func TestTunnelProbeUnwired(t *testing.T) {
+	sup := newSupervisor(t.TempDir()+"/client.yaml", func(ctx context.Context, c *conf.Conf) error { return nil })
+	_, _, err := sup.probeViaTunnel(context.Background(), "127.0.0.1:9", 10)
+	if err == nil {
+		t.Fatal("want error when no probe fn set, got nil")
+	}
+}
+
+func TestTunnelProbeDelegates(t *testing.T) {
+	sup := newSupervisor(t.TempDir()+"/client.yaml", func(ctx context.Context, c *conf.Conf) error { return nil })
+	sup.setTunnelProbe(func(ctx context.Context, target string, d time.Duration) (int64, bool, error) {
+		if target != "127.0.0.1:9" {
+			t.Errorf("target = %q", target)
+		}
+		if d != 7*time.Second {
+			t.Errorf("timeout = %v", d)
+		}
+		return 42, true, nil
+	})
+	ms, spoke, err := sup.probeViaTunnel(context.Background(), "127.0.0.1:9", 7)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if ms != 42 || !spoke {
+		t.Fatalf("got (%d, %v)", ms, spoke)
+	}
+}

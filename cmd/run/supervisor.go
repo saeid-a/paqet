@@ -53,6 +53,35 @@ type supervisor struct {
 	listenerCancel map[string]context.CancelFunc
 	listenerToken  map[string]uint64
 	listenerSeq    uint64
+	// tunnelProbe dials targets through the tunnel for the panel's
+	// through-tunnel probe. Set by the client startFn once the client
+	// exists; nil when the core never started (e.g. server role).
+	tunnelMu    sync.RWMutex
+	tunnelProbe func(ctx context.Context, target string, timeout time.Duration) (ms int64, spoke bool, err error)
+}
+
+// setTunnelProbe installs the through-tunnel dial func for the panel.
+func (s *supervisor) setTunnelProbe(fn func(ctx context.Context, target string, timeout time.Duration) (int64, bool, error)) {
+	s.tunnelMu.Lock()
+	defer s.tunnelMu.Unlock()
+	s.tunnelProbe = fn
+}
+
+// probeViaTunnel runs the through-tunnel probe or reports it unavailable.
+func (s *supervisor) probeViaTunnel(ctx context.Context, target string, timeoutSec int) (int64, bool, error) {
+	s.tunnelMu.RLock()
+	fn := s.tunnelProbe
+	s.tunnelMu.RUnlock()
+	if fn == nil {
+		return 0, false, fmt.Errorf("tunnel probe unavailable (core not running)")
+	}
+	if timeoutSec <= 0 {
+		timeoutSec = 10
+	}
+	if timeoutSec > 15 {
+		timeoutSec = 15
+	}
+	return fn(ctx, target, time.Duration(timeoutSec)*time.Second)
 }
 
 func newSupervisor(configPath string, startFn func(ctx context.Context, cfg *conf.Conf) error) *supervisor {
@@ -456,6 +485,7 @@ func (s *supervisor) boot(parentCtx context.Context, initial *conf.Conf) {
 		ListenerStop:    s.StopListener,
 		ListenerRunning: s.ListenerRunning,
 		Drain:           s.Drain,
+		TunnelProbe:     s.probeViaTunnel,
 	})
 
 	// initial start (same path as UI start, but without double-lock confusion).
