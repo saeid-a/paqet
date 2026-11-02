@@ -9,44 +9,44 @@ import (
 	"paqet/internal/client"
 	"paqet/internal/conf"
 	"paqet/internal/forward"
-	"paqet/internal/metrics"
 	"paqet/internal/socks"
 )
 
 func startClient(cfg *conf.Conf) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	metrics.SetRole(cfg.Role)
-	metrics.Start(ctx, cfg.Metrics)
 
-	client, err := client.New(cfg)
-	if err != nil {
-		log.Fatalf("failed to initialize client: %v", err)
-	}
-	if err := client.Start(ctx); err != nil {
-		log.Fatalf("client encountered an error: %v", err)
-	}
-
-	for _, ss := range cfg.SOCKS5 {
-		s, err := socks.New(client)
+	sup := newSupervisor(confPath, func(coreCtx context.Context, c *conf.Conf) error {
+		cl, err := client.New(c)
 		if err != nil {
-			log.Fatalf("failed to initialize SOCKS5: %v", err)
+			return err
 		}
-		if err := s.Start(ctx, ss); err != nil {
-			log.Fatalf("SOCKS5 encountered an error: %v", err)
+		if err := cl.Start(coreCtx); err != nil {
+			return err
 		}
-	}
+		for _, ss := range c.SOCKS5 {
+			ss := ss
+			s, err := socks.New(cl)
+			if err != nil {
+				return err
+			}
+			if err := s.Start(coreCtx, ss); err != nil {
+				return err
+			}
+		}
+		for _, ff := range c.Forward {
+			ff := ff
+			f, err := forward.New(cl, ff.Listen.String(), ff.Target)
+			if err != nil {
+				return err
+			}
+			if err := f.Start(coreCtx, ff.Protocol); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 
-	for _, ff := range cfg.Forward {
-		f, err := forward.New(client, ff.Listen.String(), ff.Target)
-		if err != nil {
-			log.Fatalf("failed to initialize Forward: %v", err)
-		}
-		if err := f.Start(ctx, ff.Protocol); err != nil {
-			log.Fatalf("forward encountered an error: %v", err)
-		}
-	}
-
-	<-ctx.Done()
+	sup.boot(ctx, cfg)
 	log.Printf("shutdown signal received, shutting down...")
 }

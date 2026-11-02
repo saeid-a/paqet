@@ -22,7 +22,7 @@ usage() {
   echo "  bash scripts/paqet.sh supervise-server"
   echo "  bash scripts/paqet.sh monitor-client"
   echo "  bash scripts/paqet.sh monitor-server"
-  echo "  bash scripts/paqet.sh monitor-packets <iface> <port>"
+  echo "  bash scripts/paqet.sh monitor-packets [config]"
   echo "  bash scripts/paqet.sh ping [payload]"
 }
 
@@ -42,9 +42,13 @@ case "$cmd" in
       echo "client.yaml already exists"
       exit 0
     fi
+    if [ -f "$client_cfg" ]; then
+      chmod 0600 "$client_cfg"
+    fi
     cp "$root_dir/example/client.yaml.example" "$client_cfg"
+    chmod 0600 "$client_cfg"
     echo "client.yaml created"
-    "$bin_path" iface || true
+    echo "Discover interfaces with: ip link (Linux) or ifconfig (macOS); then edit network.interface in client.yaml"
     ;;
   setup-server)
     ensure_bin
@@ -52,9 +56,13 @@ case "$cmd" in
       echo "server.yaml already exists"
       exit 0
     fi
+    if [ -f "$server_cfg" ]; then
+      chmod 0600 "$server_cfg"
+    fi
     cp "$root_dir/example/server.yaml.example" "$server_cfg"
+    chmod 0600 "$server_cfg"
     echo "server.yaml created"
-    "$bin_path" iface || true
+    echo "Discover interfaces with: ip link (Linux) or ifconfig (macOS); then edit network.interface in server.yaml"
     ;;
   run-client)
     ensure_bin
@@ -70,7 +78,7 @@ case "$cmd" in
     ensure_bin
     mkdir -p "$logs_dir"
     while true; do
-      sudo "$bin_path" run -c "$client_cfg" 2>&1 | tee -a "$logs_dir/client.log"
+      sudo "$bin_path" run -c "$client_cfg" 2>&1 | tee -a "$logs_dir/client.log" || true
       echo "client exited, restarting in 3s"
       sleep 3
     done
@@ -79,7 +87,7 @@ case "$cmd" in
     ensure_bin
     mkdir -p "$logs_dir"
     while true; do
-      sudo "$bin_path" run -c "$server_cfg" 2>&1 | tee -a "$logs_dir/server.log"
+      sudo "$bin_path" run -c "$server_cfg" 2>&1 | tee -a "$logs_dir/server.log" || true
       echo "server exited, restarting in 3s"
       sleep 3
     done
@@ -93,12 +101,9 @@ case "$cmd" in
     tail -f "$logs_dir/server.log"
     ;;
   monitor-packets)
-    if [ -z "$arg2" ] || [ -z "$arg3" ]; then
-      echo "monitor-packets requires interface and port"
-      exit 1
-    fi
     ensure_bin
-    sudo "$bin_path" dump -i "$arg2" -p "$arg3"
+    cfg="${arg2:-$server_cfg}"
+    sudo "$bin_path" dump -c "$cfg"
     ;;
   ping)
     ensure_bin

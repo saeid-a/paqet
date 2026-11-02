@@ -162,6 +162,26 @@ sudo iptables -t filter -A OUTPUT -p tcp --sport <PORT> -j ACCEPT
 
 These rules ensure that only the application handles traffic for the connection port.
 
+The client needs the mirror image of rule 2: the handshake elicits
+SYNACKs to ephemeral ports no kernel socket owns, and the kernel's RST
+reply tears down the NAT/firewall mapping the handshake just built
+(observed live as `[R]` immediately following an elicited SYNACK).
+Scope the suppression to the server address so unrelated traffic keeps
+normal reset behavior:
+
+```bash
+# Replace <SERVER_IP> with the paqet server address (e.g., 128.140.2.9).
+# Run as root on the client (Linux):
+sudo iptables -t raw -A PREROUTING -s <SERVER_IP> -p tcp -j NOTRACK
+sudo iptables -t mangle -A OUTPUT -d <SERVER_IP> -p tcp --tcp-flags RST RST -j DROP
+```
+
+No application-code change is made for this: suppressing own-kernel
+resets portably would require the binary to manage host firewall rules
+itself (root- and platform-specific, with side effects beyond the
+handshake tuple), which is out of scope. Operator-applied scoped rules
+are the established mechanism.
+
 ### 3. Run `paqet`
 
 Make the downloaded binary executable (`chmod +x ./paqet_linux_amd64`). You will need root privileges to use raw sockets.
@@ -192,6 +212,41 @@ curl -v https://httpbin.org/ip --proxy socks5h://127.0.0.1:1080
 ```
 
 This request will be proxied over raw TCP packets to the server, and then forwarded according to the client mode configuration. The output should show your server's public IP address, confirming the connection is working.
+
+### 5. Control Panel (web UI)
+
+`paqet run` includes a lightweight, dependency-free control panel (single embedded HTML file, no JS frameworks).
+
+Enable it in `config.yaml`:
+
+```yaml
+admin:
+  enabled: true
+  listen: "127.0.0.1:9090"
+```
+
+Then open `http://127.0.0.1:9090`. The legacy `metrics:` section still works as a fallback.
+
+What you get:
+
+- **Status**: role, uptime, throughput in/out (with 120s chart), packets, active conns/streams, success/failure table, version + config path.
+- **Connections**: live table with search filter.
+- **Config**: view/edit raw YAML from the panel, validates before saving, `Save + Restart` to apply.
+- **Logs**: in-memory tail (1000 lines) with level filter and auto-refresh.
+- **Control**: `Start` / `Stop` / `Restart` buttons. The panel stays up while the core is stopped, so you can fix config and restart without SSH.
+
+JSON API (same server):
+
+| Method | Path | Description |
+| :----- | :--- | :---------- |
+| `GET` | `/metrics` | legacy status snapshot JSON |
+| `GET` | `/api/status` | status + `running`, `config_path`, `build` |
+| `GET` / `PUT` | `/api/config` | raw YAML get/save (validates, `0600` file) |
+| `POST` | `/api/control` | `{"action":"start"\|"stop"\|"restart"}` |
+| `GET` | `/api/logs?tail=200&level=all` | in-memory logs |
+| `GET` | `/api/version` | version/build info |
+
+> Bind to `127.0.0.1` and use SSH port-forwarding for remote boxes. There is no auth — do not expose the panel to the internet.
 
 ## Command-Line Usage
 

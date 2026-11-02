@@ -20,6 +20,7 @@ type Conf struct {
 	Server    Server    `yaml:"server"`
 	Transport Transport `yaml:"transport"`
 	Metrics   Metrics   `yaml:"metrics"`
+	Admin     Metrics   `yaml:"admin"`
 }
 
 func LoadFromFile(path string) (*Conf, error) {
@@ -28,6 +29,10 @@ func LoadFromFile(path string) (*Conf, error) {
 		return nil, err
 	}
 
+	return LoadFromBytes(data)
+}
+
+func LoadFromBytes(data []byte) (*Conf, error) {
 	var conf Conf
 
 	if err := yaml.Unmarshal(data, &conf); err != nil {
@@ -47,6 +52,18 @@ func LoadFromFile(path string) (*Conf, error) {
 	return &conf, nil
 }
 
+// EffectiveAdmin returns the admin/UI listen config.
+// Prefers `admin:` section, falls back to legacy `metrics:` for compat.
+func (c *Conf) EffectiveAdmin() Metrics {
+	if c.Admin.Enabled {
+		return c.Admin
+	}
+	if c.Metrics.Enabled {
+		return c.Metrics
+	}
+	return c.Admin
+}
+
 func (c *Conf) setDefaults() {
 	c.Log.setDefaults()
 	c.Listen.setDefaults()
@@ -60,6 +77,7 @@ func (c *Conf) setDefaults() {
 	c.Server.setDefaults()
 	c.Transport.setDefaults(c.Role)
 	c.Metrics.setDefaults()
+	c.Admin.setDefaults()
 }
 
 func (c *Conf) validate() error {
@@ -86,6 +104,7 @@ func (c *Conf) validate() error {
 	allErrors = append(allErrors, c.Network.validate()...)
 	allErrors = append(allErrors, c.Transport.validate()...)
 	allErrors = append(allErrors, c.Metrics.validate()...)
+	allErrors = append(allErrors, c.Admin.validate()...)
 	if c.Role == "server" {
 		allErrors = append(allErrors, c.Listen.validate()...)
 	} else {
