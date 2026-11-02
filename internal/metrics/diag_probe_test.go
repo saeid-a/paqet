@@ -40,3 +40,12 @@ func TestDiagUDPRejectsBadPort(t *testing.T) {
 		t.Fatalf("want 400, got %d", rec.Code)
 	}
 }
+
+func TestDiagMTURejectsBadPort(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/diag/mtu", strings.NewReader(`{"host":"x","port":-1}`))
+	rec := httptest.NewRecorder()
+	diagMTUHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", rec.Code)
+	}
+}

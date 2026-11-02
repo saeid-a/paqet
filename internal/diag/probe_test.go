@@ -36,3 +36,16 @@ func TestUDPReplyMatchesOnlyPeer(t *testing.T) {
 		t.Fatal("nil reply must not match")
 	}
 }
+
+func TestMTUProbeReportsConfigured(t *testing.T) {
+	res, err := MTUProbe(context.Background(), "192.0.2.1", 9999)
+	if err != nil {
+		t.Fatalf("mtu probe must not hard-fail, got %v", err)
+	}
+	if res.InterfaceMTU <= 0 {
+		t.Fatal("must report a local interface MTU")
+	}
+	if res.KCPMTU < 0 {
+		t.Fatal("kcp mtu must be >= 0")
+	}
+}

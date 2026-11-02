@@ -109,6 +109,67 @@ func matchUDPReply(from, peer *net.UDPAddr) bool {
 	return from.IP.Equal(peer.IP)
 }
 
+// MTU sweep sizes: payload bytes tried largest-first against an echoing
+// peer. Total sweep budget stays under the probe cap.
+var mtuSweepSizes = []int{1472, 1400, 1350, 1200}
+
+// MTUResult reports local, configured, and probed MTU values.
+type MTUResult struct {
+	InterfaceMTU int    `json:"interface_mtu"`
+	KCPMTU       int    `json:"kcp_mtu"`
+	ProbeMTU     int    `json:"probe_mtu,omitempty"`
+	Note         string `json:"note,omitempty"`
+}
+
+// MTUProbe reports the largest up-interface MTU plus a best-effort UDP
+// payload sweep against host:port. KCPMTU is left for the caller (the
+// handler reads it from the loaded config); a non-echoing peer yields
+// configured values with guidance instead of an error. Never uses raw
+// sockets; the whole sweep stays within probeMaxTimeout.
+func MTUProbe(ctx context.Context, host string, port int) (MTUResult, error) {
+	host = strings.TrimSpace(host)
+	if err := validateProbeTarget(host, port); err != nil {
+		return MTUResult{}, err
+	}
+	ifaceMTU := 0
+	if ifaces, err := Interfaces(); err == nil {
+		for _, fi := range ifaces {
+			if !fi.IsUp {
+				continue
+			}
+			if fi.MTU > ifaceMTU {
+				ifaceMTU = fi.MTU
+			}
+		}
+		if ifaceMTU == 0 {
+			for _, fi := range ifaces {
+				if fi.MTU > ifaceMTU {
+					ifaceMTU = fi.MTU
+				}
+			}
+		}
+	}
+	res := MTUResult{InterfaceMTU: ifaceMTU}
+	sweepCtx, cancel := context.WithTimeout(ctx, probeMaxTimeout*time.Second)
+	defer cancel()
+	for _, size := range mtuSweepSizes {
+		if sweepCtx.Err() != nil {
+			break
+		}
+		r, err := UDPProbe(sweepCtx, host, port, 1, size)
+		if err != nil || !r.OK {
+			continue
+		}
+		res.ProbeMTU = size
+		res.Note = fmt.Sprintf("largest echoed payload %d bytes", size)
+		return res, nil
+	}
+	if res.ProbeMTU == 0 {
+		res.Note = "no echo — reporting interface MTU; check KCP mtu against interface MTU"
+	}
+	return res, nil
+}
+
 // UDPProbe sends a nonce datagram to host:port and waits for a reply.
 // A timeout reports no-echo rather than failure: arbitrary hosts only
 // reply when something echoes UDP there.

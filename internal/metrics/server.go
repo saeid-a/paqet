@@ -229,6 +229,7 @@ func StartWithController(ctx context.Context, cfg conf.Admin, c Controller) {
 	mux.HandleFunc("/api/diag/dump", requireAuth(diagDumpHandler))
 	mux.HandleFunc("/api/diag/dial", requireAuth(diagDialHandler))
 	mux.HandleFunc("/api/diag/udp", requireAuth(diagUDPHandler))
+	mux.HandleFunc("/api/diag/mtu", requireAuth(diagMTUHandler))
 	mux.HandleFunc("/api/safety/posture", requireAuth(postureHandler))
 	mux.HandleFunc("/api/safety/preflight", requireAuth(preflightHandler))
 	mux.HandleFunc("/api/config/validate", requireAuth(configValidateHandler))
