@@ -44,3 +44,14 @@ func TestDashboardHasConfigSafety(t *testing.T) {
         if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
     }
 }
+
+func TestDashboardHasDrain(t *testing.T) {
+    html, err := os.ReadFile("dashboard.html")
+    if err != nil {
+        t.Fatal(err)
+    }
+    s := string(html)
+    for _, want := range []string{`id="bDrain"`, "api/core/drain", "drainControl"} {
+        if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+    }
+}

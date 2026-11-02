@@ -148,6 +148,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <button id="bStart" class="primary">Start</button>
 <button id="bStop" class="danger">Stop</button>
 <button id="bRestart">Restart</button>
+<button id="bDrain" title="drain active conns/streams">Drain</button>
 <input type="password" id="tok" placeholder="auth token" autocomplete="off" spellcheck="false" title="Bearer token, saved in sessionStorage">
 <span class="ver mono" id="cfgPath" style="align-self:center"></span>
 </div>
@@ -501,7 +502,7 @@ var rtt=pick(k,"rtt","rtt_ms","srtt","smooth_rtt",0)||pick(d,"kcp_rtt","rtt_ms",
 setT("kcpRtt",(rtt==null||+rtt<=0)?"—":fmtMs(rtt));
 var rto=pick(k,"rto","rto_ms",0),cwnd=pick(k,"cwnd","snd_wnd","wnd",0);
 setT("kcpSub","rto "+((rto==null||+rto<=0)?"—":fmtMs(rto))+" · cwnd "+((cwnd==null||+cwnd<=0)?"—":fmtInt(cwnd)));
-$("bStart").disabled=!!d.running;$("bStop").disabled=!d.running;$("bRestart").disabled=false;
+$("bStart").disabled=!!d.running;$("bStop").disabled=!d.running;$("bRestart").disabled=false;$("bDrain").disabled=!d.running;
 histIn.push(rIn);histOut.push(rOut);
 if(histIn.length>MAX)histIn.shift();if(histOut.length>MAX)histOut.shift();
 renderSF(d);renderConns(d.connections);checkSpike(d,now);
@@ -530,6 +531,8 @@ if(o.ok){notice(action+" ok — running="+o.j.running,true);}else{notice("contro
 poll();}).catch(function(e){notice("control failed: "+e.message,false);}).finally(function(){poll();});
 }
 $("bStart").onclick=function(){control("start");};$("bStop").onclick=function(){control("stop");};$("bRestart").onclick=function(){control("restart");};
+function drainControl(t){t=+t||10;if(!confirm("Drain active connections?"))return;var b=$("bDrain");if(b)b.disabled=true;api("api/core/drain",{method:"POST",body:JSON.stringify({timeout_sec:t})}).then(function(r){return r.text().then(function(txt){var j=null;try{j=JSON.parse(txt);}catch(e){}return {ok:r.ok,st:r.status,j:j,raw:txt};});}).then(function(o){if(o.ok){toast("drain ok","ok");}else if(o.st===501){toast("drain unavailable (http 501) — continuing","warn");}else{toast("drain failed: "+((o.j&&o.j.error)||o.raw||("http "+o.st)),"err");}poll();}).catch(function(e){toast("drain failed: "+e.message,"err");}).finally(function(){poll();});}
+$("bDrain").onclick=function(){drainControl(10);};
 // config sub-tabs
 document.querySelectorAll("button.sub[data-ct]").forEach(function(b){b.onclick=function(){document.querySelectorAll("button.sub[data-ct]").forEach(function(x){x.classList.toggle("on",x===b);});$("c-yaml").classList.toggle("hide",b.dataset.ct!=="yaml");$("c-form").classList.toggle("hide",b.dataset.ct!=="form");if(b.dataset.ct==="form"){loadIfaces(false);loadBackups();}};});
 var cfgLoaded=false;
