@@ -39,14 +39,41 @@ type Snapshot struct {
 	Runtime           RuntimeStats   `json:"runtime"`
 	Targets           []TargetStat   `json:"targets"`
 	Connections       []ConnSnapshot `json:"connections"`
+	Transport         TransportStats `json:"transport"`
 }
 
 type KCPStats struct {
-	RTTMs       int64  `json:"rtt_ms"`
-	RTOMs       int64  `json:"rto_ms"`
-	Cwnd        int64  `json:"cwnd"`
-	Retransmits uint64 `json:"retransmits"`
-	FECShards   int64  `json:"fec_shards"`
+	RTTMs            int64  `json:"rtt_ms"`
+	RTOMs            int64  `json:"rto_ms"`
+	Cwnd             int64  `json:"cwnd"`
+	Retransmits      uint64 `json:"retransmits"`
+	FECShards        int64  `json:"fec_shards"`
+	SRTTVarMs        int64  `json:"srtt_var_ms"`
+	LostSegs         uint64 `json:"lost_segs"`
+	RepeatSegs       uint64 `json:"repeat_segs"`
+	FastRetransSegs  uint64 `json:"fast_retrans_segs"`
+	EarlyRetransSegs uint64 `json:"early_retrans_segs"`
+	FECRecovered     uint64 `json:"fec_recovered"`
+	FECErrs          uint64 `json:"fec_errs"`
+	FECParityShards  uint64 `json:"fec_parity_shards"`
+	InSegs           uint64 `json:"in_segs"`
+	OutSegs          uint64 `json:"out_segs"`
+}
+
+type TransportStats struct {
+	SndQueue       int64  `json:"snd_queue"`
+	RcvQueue       int64  `json:"rcv_queue"`
+	SndBuf         int64  `json:"snd_buf"`
+	NumStreams     int64  `json:"num_streams"`
+	NumConns       int64  `json:"num_conns"`
+	HeapAllocBytes uint64 `json:"heap_alloc_bytes"`
+	SysBytes       uint64 `json:"sys_bytes"`
+	GCCycles       uint64 `json:"gc_cycles"`
+	TargetFill     int    `json:"target_fill"`
+	TargetCap      int    `json:"target_cap"`
+	RetransSegs    uint64 `json:"retrans_segs"`
+	LostSegs       uint64 `json:"lost_segs"`
+	FECRecovered   uint64 `json:"fec_recovered"`
 }
 
 type RuntimeStats struct {
@@ -208,16 +235,39 @@ func IncFailureForwardUDP() {
 	atomic.AddUint64(&failureFwdUDP, 1)
 }
 
-// ---- KCP transport stats (stubs) ----
-// TODO: wire these to kcp-go session introspection (RTT/RTO/cwnd are not
-// currently exposed by the tnet/kcp wrapper); until then they report the
-// last values pushed via SetKCPStats/SetKCPQuality, defaulting to 0.
+// ---- KCP transport stats ----
+// Live values are pushed by internal/tnet/kcp StartStatsLoop via the
+// setters below (DefaultSnmp.Copy + GetSRTT/GetRTO averages). Until the
+// first sample they report 0, which the dashboard renders as "—".
 
 var kcpRTTMs int64
 var kcpRTOMs int64
 var kcpCwnd int64
 var kcpRetransmits uint64
 var kcpFECShards int64
+var kcpSRTTVarMs int64
+var kcpLostSegs uint64
+var kcpRepeatSegs uint64
+var kcpFastRetransSegs uint64
+var kcpEarlyRetransSegs uint64
+var kcpFECRecovered uint64
+var kcpFECErrs uint64
+var kcpFECParityShards uint64
+var kcpInSegs uint64
+var kcpOutSegs uint64
+
+var trSndQueue int64
+var trRcvQueue int64
+var trSndBuf int64
+var trNumStreams int64
+var trNumConns int64
+var trHeapAlloc uint64
+var trSys uint64
+var trGCCycles uint64
+var trTargetFill int64
+var trRetransSegs uint64
+var trLostSegs uint64
+var trFECRecovered uint64
 
 func SetKCPStats(rtt, rto, cwnd int64) {
 	atomic.StoreInt64(&kcpRTTMs, rtt)
@@ -228,6 +278,41 @@ func SetKCPStats(rtt, rto, cwnd int64) {
 func SetKCPQuality(retransmits uint64, fecShards int64) {
 	atomic.StoreUint64(&kcpRetransmits, retransmits)
 	atomic.StoreInt64(&kcpFECShards, fecShards)
+}
+
+func SetKCPDetail(srttVar int64, lost, repeat, fastRetx, earlyRetx, fecRecovered, fecErrs, fecParity, inSegs, outSegs uint64) {
+	atomic.StoreInt64(&kcpSRTTVarMs, srttVar)
+	atomic.StoreUint64(&kcpLostSegs, lost)
+	atomic.StoreUint64(&kcpRepeatSegs, repeat)
+	atomic.StoreUint64(&kcpFastRetransSegs, fastRetx)
+	atomic.StoreUint64(&kcpEarlyRetransSegs, earlyRetx)
+	atomic.StoreUint64(&kcpFECRecovered, fecRecovered)
+	atomic.StoreUint64(&kcpFECErrs, fecErrs)
+	atomic.StoreUint64(&kcpFECParityShards, fecParity)
+	atomic.StoreUint64(&kcpInSegs, inSegs)
+	atomic.StoreUint64(&kcpOutSegs, outSegs)
+}
+
+func SetTransportSnapshot(s TransportStats) {
+	atomic.StoreInt64(&trSndQueue, s.SndQueue)
+	atomic.StoreInt64(&trRcvQueue, s.RcvQueue)
+	atomic.StoreInt64(&trSndBuf, s.SndBuf)
+	atomic.StoreInt64(&trNumStreams, s.NumStreams)
+	atomic.StoreInt64(&trNumConns, s.NumConns)
+	atomic.StoreUint64(&trHeapAlloc, s.HeapAllocBytes)
+	atomic.StoreUint64(&trSys, s.SysBytes)
+	atomic.StoreUint64(&trGCCycles, s.GCCycles)
+	atomic.StoreInt64(&trTargetFill, int64(s.TargetFill))
+	atomic.StoreUint64(&trRetransSegs, s.RetransSegs)
+	atomic.StoreUint64(&trLostSegs, s.LostSegs)
+	atomic.StoreUint64(&trFECRecovered, s.FECRecovered)
+	// keep legacy aliases populated so old UI/tests keep working
+	if s.RetransSegs != 0 {
+		atomic.StoreUint64(&kcpRetransmits, s.RetransSegs)
+	}
+	if s.FECRecovered != 0 {
+		atomic.StoreInt64(&kcpFECShards, int64(s.FECRecovered))
+	}
 }
 
 func SetConnKCP(id uint64, rtt int64) {
@@ -527,15 +612,40 @@ func SnapshotNow() Snapshot {
 		SuccessFwdUDP:     atomic.LoadUint64(&successFwdUDP),
 		FailureFwdUDP:     atomic.LoadUint64(&failureFwdUDP),
 		KCP: KCPStats{
-			RTTMs:       atomic.LoadInt64(&kcpRTTMs),
-			RTOMs:       atomic.LoadInt64(&kcpRTOMs),
-			Cwnd:        atomic.LoadInt64(&kcpCwnd),
-			Retransmits: atomic.LoadUint64(&kcpRetransmits),
-			FECShards:   atomic.LoadInt64(&kcpFECShards),
+			RTTMs:            atomic.LoadInt64(&kcpRTTMs),
+			RTOMs:            atomic.LoadInt64(&kcpRTOMs),
+			Cwnd:             atomic.LoadInt64(&kcpCwnd),
+			Retransmits:      atomic.LoadUint64(&kcpRetransmits),
+			FECShards:        atomic.LoadInt64(&kcpFECShards),
+			SRTTVarMs:        atomic.LoadInt64(&kcpSRTTVarMs),
+			LostSegs:         atomic.LoadUint64(&kcpLostSegs),
+			RepeatSegs:       atomic.LoadUint64(&kcpRepeatSegs),
+			FastRetransSegs:  atomic.LoadUint64(&kcpFastRetransSegs),
+			EarlyRetransSegs: atomic.LoadUint64(&kcpEarlyRetransSegs),
+			FECRecovered:     atomic.LoadUint64(&kcpFECRecovered),
+			FECErrs:          atomic.LoadUint64(&kcpFECErrs),
+			FECParityShards:  atomic.LoadUint64(&kcpFECParityShards),
+			InSegs:           atomic.LoadUint64(&kcpInSegs),
+			OutSegs:          atomic.LoadUint64(&kcpOutSegs),
 		},
 		Runtime:     RuntimeNow(),
 		Targets:     TopTargets(maxTargetEntries),
 		Connections: connSnaps,
+		Transport: TransportStats{
+			SndQueue:       atomic.LoadInt64(&trSndQueue),
+			RcvQueue:       atomic.LoadInt64(&trRcvQueue),
+			SndBuf:         atomic.LoadInt64(&trSndBuf),
+			NumStreams:     atomic.LoadInt64(&trNumStreams),
+			NumConns:       atomic.LoadInt64(&trNumConns),
+			HeapAllocBytes: atomic.LoadUint64(&trHeapAlloc),
+			SysBytes:       atomic.LoadUint64(&trSys),
+			GCCycles:       atomic.LoadUint64(&trGCCycles),
+			TargetFill:     int(atomic.LoadInt64(&trTargetFill)),
+			TargetCap:      maxTargetEntries,
+			RetransSegs:    atomic.LoadUint64(&trRetransSegs),
+			LostSegs:       atomic.LoadUint64(&trLostSegs),
+			FECRecovered:   atomic.LoadUint64(&trFECRecovered),
+		},
 	}
 }
 
