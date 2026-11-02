@@ -104,3 +104,64 @@ func diagDialHandler(w http.ResponseWriter, r *http.Request) {
 	flog.Auditf("diag dial %s:%d from %s ok=%v err=%q", host, req.Port, remoteIP(r), res.OK, res.Error)
 	writeDiagJSON(w, res)
 }
+
+// diagUDPHandler serves POST /api/diag/udp.
+func diagUDPHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !tryAcquireProbe() {
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "too many probes", http.StatusTooManyRequests)
+		return
+	}
+	defer releaseProbe()
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	var req struct {
+		Host       string `json:"host"`
+		Port       int    `json:"port"`
+		TimeoutSec int    `json:"timeout_sec"`
+		Bytes      int    `json:"bytes"`
+		NBytes     int    `json:"nbytes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	host := strings.TrimSpace(req.Host)
+	if host == "" || len(host) > 253 {
+		http.Error(w, "missing host", http.StatusBadRequest)
+		return
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		http.Error(w, "invalid port (want 1-65535)", http.StatusBadRequest)
+		return
+	}
+	nbytes := req.Bytes
+	if nbytes == 0 {
+		nbytes = req.NBytes
+	}
+	timeoutSec := clampProbeSec(req.TimeoutSec, probeDefaultSec, probeMaxSec)
+	v, ok := runDiagWithTimeout(r.Context(), time.Duration(timeoutSec)*time.Second, func() any {
+		res, err := diag.UDPProbe(r.Context(), host, req.Port, timeoutSec, nbytes)
+		if err != nil {
+			return map[string]any{"error": err.Error()}
+		}
+		return res
+	})
+	if !ok {
+		http.Error(w, "udp probe timed out", http.StatusGatewayTimeout)
+		return
+	}
+	if m, isMap := v.(map[string]any); isMap {
+		if msg, hasErr := m["error"]; hasErr {
+			http.Error(w, "invalid probe: "+msg.(string), http.StatusBadRequest)
+			return
+		}
+	}
+	res, _ := v.(diag.UDPResult)
+	flog.Auditf("diag udp %s:%d from %s ok=%v err=%q note=%q", host, req.Port, remoteIP(r), res.OK, res.Error, res.Note)
+	writeDiagJSON(w, res)
+}

@@ -16,8 +16,7 @@ func TestDiagDialRejectsBadPort(t *testing.T) {
 	}
 }
 
-func TestDiagDialConcurrencyCap(t *testing.T) {
-	for i := 0; i < 4; i++ {
+func TestDiagDialConcurrencyCap(t *testing.T) {	for i := 0; i < 4; i++ {
 		dialSem <- struct{}{}
 	}
 	defer func() {
@@ -30,5 +29,14 @@ func TestDiagDialConcurrencyCap(t *testing.T) {
 	diagDialHandler(rec, req)
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("want 429, got %d", rec.Code)
+	}
+}
+
+func TestDiagUDPRejectsBadPort(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/diag/udp", strings.NewReader(`{"host":"x","port":99999}`))
+	rec := httptest.NewRecorder()
+	diagUDPHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", rec.Code)
 	}
 }
