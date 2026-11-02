@@ -121,3 +121,11 @@ func TestDashboardHasAuditTimeline(t *testing.T) {
         if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
     }
 }
+
+func TestDashboardHasTabDeepLink(t *testing.T) {
+    html, _ := os.ReadFile("dashboard.html")
+    s := string(html)
+    for _, want := range []string{"hashchange", "location.hash", "tabFromHash"} {
+        if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+    }
+}

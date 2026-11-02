@@ -382,8 +382,10 @@ function api(p,o){o=o||{};o.headers=authH(o.headers||{});return fetch(p,o);}
 // tabs
 var TABS=["overview","conns","targets","config","logs","diag","setup"];
 var tabs=document.querySelectorAll("button.tab");
-function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();loadAudit();}if(t==="diag")loadIfaces(true);if(t==="setup"){loadPreflight();loadPosture();}if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview"){loadPosture();loadRuntime();}}
+function tabFromHash(){try{var h=String(location.hash||"").replace(/^#\/?/,"").split("?")[0];if(TABS.indexOf(h)>=0)return h;}catch(e){}return null;}
+function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();loadAudit();}if(t==="diag")loadIfaces(true);if(t==="setup"){loadPreflight();loadPosture();}if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview"){loadPosture();loadRuntime();}try{if(tabFromHash()!==t)location.hash=t;}catch(e){}}
 tabs.forEach(function(b){b.onclick=function(){showTab(b.dataset.t);};});
+window.addEventListener("hashchange",function(){var h=tabFromHash();if(h)showTab(h);});
 document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=7)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
 // modal drawer
 function openModal(c){setT("modalBody",JSON.stringify(c,null,2));$("modal").classList.remove("hide");}
@@ -1077,7 +1079,7 @@ $("bSshCopy").onclick=function(){copyText(sshCmd(sshBind));setupNote("SSH cmd co
 try{renderSshSnippet();}catch(e){}
 $("q").addEventListener("input",applyFilter);
 try{$("connGone").addEventListener("change",function(){showGone=this.checked;applyFilter();});}catch(e){}
-fitCanvas();poll();driftLoop();sseInit();
+fitCanvas();try{var h0=tabFromHash();if(h0)showTab(h0);}catch(e){}poll();driftLoop();sseInit();
 </script>
 </body>
 </html>
