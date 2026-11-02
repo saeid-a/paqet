@@ -77,3 +77,14 @@ func TestDashboardHasTargetHealth(t *testing.T) {
         if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
     }
 }
+
+func TestDashboardHasAlertCfg(t *testing.T) {
+    html, err := os.ReadFile("dashboard.html")
+    if err != nil {
+        t.Fatal(err)
+    }
+    s := string(html)
+    for _, want := range []string{`id="alertThr"`, `id="alertMute"`, "getAlertCfg"} {
+        if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+    }
+}

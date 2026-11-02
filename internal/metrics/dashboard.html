@@ -181,6 +181,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 </div>
 <div class="panel"><h2>Throughput (last 120s)</h2><canvas id="spark" width="600" height="140"></canvas>
 <div class="legend"><span><span class="sw" style="background:var(--grn)"></span>in <span class="mono" id="lgIn"></span></span><span><span class="sw" style="background:var(--blu)"></span>out <span class="mono" id="lgOut"></span></span></div>
+<div class="row"><label class="chk">spike +<input type="number" id="alertThr" value="10" min="1" max="1000" style="width:64px"> /min</label><label class="chk"><input type="checkbox" id="alertMute"> mute</label></div>
 </div>
 <div class="panel"><h2>Success / failure</h2><div class="wrap"><table id="sf"><tr><th>Channel</th><th class="n">Success</th><th class="n">Failure</th></tr></table></div></div>
 <p class="note">Click a connection row for JSON detail.</p>
@@ -488,14 +489,42 @@ box.appendChild(d);
 setTimeout(function(){try{if(d.parentNode===box)box.removeChild(d);}catch(e){}},9000);
 }
 function failTotal(d){if(d.failure_total!=null)return +d.failure_total||0;var f=0,n=0;["failure_tcp","failure_udp","failure_socks","failure_forward_tcp","failure_forward_udp"].forEach(function(k){if(d[k]!=null){f+=+d[k]||0;n++;}});return n?f:null;}
+// alert config: threshold persisted to localStorage, invalid -> default 10.
+function getAlertCfg(){
+var thr=10,muted=false;
+try{
+var t=localStorage.getItem("paqet-alert-thr");
+if(t!=null&&t!==""){var n=parseInt(t,10);thr=isNaN(n)?10:Math.min(1000,Math.max(1,n));}
+muted=localStorage.getItem("paqet-alert-mute")==="1";
+}catch(e){}
+// DOM overrides stored value so the visible inputs take effect immediately.
+try{
+var el=$("alertThr");
+if(el&&String(el.value)!==""){var m=parseInt(el.value,10);thr=isNaN(m)?10:Math.min(1000,Math.max(1,m));}
+var mu=$("alertMute");
+if(mu)muted=!!mu.checked;
+}catch(e){}
+return {thr:thr,muted:muted};
+}
+try{(function(){
+var thrEl=$("alertThr"),muteEl=$("alertMute");
+try{
+var t=localStorage.getItem("paqet-alert-thr");
+if(t!=null&&thrEl){var n=parseInt(t,10);if(!isNaN(n))thrEl.value=Math.min(1000,Math.max(1,n));}
+if(localStorage.getItem("paqet-alert-mute")==="1"&&muteEl)muteEl.checked=true;
+}catch(e){}
+if(thrEl)thrEl.addEventListener("input",function(){try{var n=parseInt(this.value,10);if(isNaN(n))return;localStorage.setItem("paqet-alert-thr",String(Math.min(1000,Math.max(1,n))));}catch(e){}});
+if(muteEl)muteEl.addEventListener("change",function(){try{localStorage.setItem("paqet-alert-mute",this.checked?"1":"0");}catch(e){}});
+})();}catch(e){}
 function checkSpike(d,now){
+var cfg=getAlertCfg();if(cfg.muted)return;
 var f=failTotal(d);if(f==null||document.hidden)return;
 failHist.push({t:now,f:f});while(failHist.length>1&&now-failHist[0].t>120000)failHist.shift();
 var base=failHist[0];
 for(var i=failHist.length-1;i>=0;i--){if(now-failHist[i].t>=45000){base=failHist[i];break;}}
 if(now-base.t<20000)return;
 var delta=f-base.f;
-if(delta>=10&&now-lastSpike>120000){lastSpike=now;toast("failure spike: +"+fmtInt(delta)+" failures in ~1 min","warn");}
+if(delta>=cfg.thr&&now-lastSpike>120000){lastSpike=now;toast("failure spike: +"+fmtInt(delta)+" failures in ~1 min","warn");}
 }
 function tick(d){
 lastStatus=d;
