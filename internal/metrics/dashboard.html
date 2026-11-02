@@ -1152,7 +1152,7 @@ var b=document.createElement("button");b.className="sub";b.textContent=it.runnin
 b.onclick=(function(id,act){return function(){listenerAction(id,act);};})(nm,it.running?"stop":"start");
 tdA.appendChild(b);
 }else{tdA.textContent="—";tdA.className="mono";}
-if(it&&typeof it==="object"&&String(it.type||"")==="forward"){
+if(hasState&&it&&typeof it==="object"&&String(it.type||"")==="forward"){
 var ub=document.createElement("button");ub.className="sub";ub.textContent="Use";
 ub.setAttribute("data-testid","fwd-use");ub.setAttribute("data-id",nm);
 ub.title="stop other forwards, start "+nm;
@@ -1203,8 +1203,10 @@ if(!confirm("Route traffic via "+id+"? This stops the other forward listeners.")
 fwdUseBusy=true;lstNote("switching to "+id+"…");
 var stops=[];for(i=0;i<fwd.length;i++){nm=fwd[i].id||fwd[i].name;if(nm!==id&&fwd[i].running)stops.push(nm);}
 var chain=Promise.resolve();
-stops.forEach(function(n){chain=chain.then(function(){return api("api/listeners/"+encodeURIComponent(n)+"/stop",{method:"POST",cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("stop "+n+": http "+r.status);});});});
+// Start the selection first: if it fails nothing was stopped, so the
+// panel can never strand zero forwards running.
 if(!target.running){chain=chain.then(function(){return api("api/listeners/"+encodeURIComponent(id)+"/start",{method:"POST",cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("start "+id+": http "+r.status);});});}
+stops.forEach(function(n){chain=chain.then(function(){return api("api/listeners/"+encodeURIComponent(n)+"/stop",{method:"POST",cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("stop "+n+": http "+r.status);});});});
 chain.then(function(){try{localStorage.setItem("paqet-active-forward",id);}catch(e){}renderFwdActive();loadListeners();lstNote("active forward: "+id);}).catch(function(e){lstNote("switch failed: "+String((e&&e.message)||e),true);}).finally(function(){fwdUseBusy=false;});
 }
 $("bLstRefresh").onclick=function(){loadListeners();};

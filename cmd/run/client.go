@@ -5,6 +5,7 @@ import (
 	"log"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"paqet/internal/client"
 	"paqet/internal/conf"
@@ -25,19 +26,46 @@ func startClient(cfg *conf.Conf) {
 		if err := cl.Start(coreCtx); err != nil {
 			return err
 		}
-		if err := registerDataPlaneListeners(coreCtx, sup, cl, c); err != nil {
+		if err := startDataPlaneListeners(coreCtx, sup, cl, c); err != nil {
 			return err
-		}
-		for _, name := range sup.ListListeners() {
-			if err := sup.StartListener(name); err != nil {
-				return err
-			}
 		}
 		return nil
 	})
 
 	sup.boot(ctx, cfg)
 	log.Printf("shutdown signal received, shutting down...")
+}
+
+// dataPlaneListenerIDs returns the registry IDs for the configured
+// data-plane listeners: "socks5:<listen>" and "forward:<listen>".
+func dataPlaneListenerIDs(cfg *conf.Conf) []string {
+	var ids []string
+	for _, ss := range cfg.SOCKS5 {
+		ids = append(ids, "socks5:"+ss.Listen_)
+	}
+	for _, ff := range cfg.Forward {
+		ids = append(ids, "forward:"+ff.Listen_)
+	}
+	return ids
+}
+
+// startDataPlaneListeners (re)starts the data-plane listeners. It is
+// idempotent across core restarts: previous-generation entries are
+// unregistered (stopped) first, so re-registration never hits the
+// "already running" refusal and the new generation owns the ports.
+func startDataPlaneListeners(coreCtx context.Context, sup *supervisor, cl *client.Client, cfg *conf.Conf) error {
+	for _, id := range dataPlaneListenerIDs(cfg) {
+		sup.UnregisterListener(id)
+	}
+	if err := registerDataPlaneListeners(coreCtx, sup, cl, cfg); err != nil {
+		return err
+	}
+	for _, id := range dataPlaneListenerIDs(cfg) {
+		if err := sup.StartListener(id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // registerDataPlaneListeners registers each SOCKS5/forward data-plane
@@ -72,13 +100,29 @@ func registerDataPlaneListeners(coreCtx context.Context, sup *supervisor, cl *cl
 // then blocks while serving so ListenerRunning stays true. Returning nil
 // after serving avoids the supervisor retry loop; only start failures are
 // returned. Tying the socket lifetime to coreCtx preserves the current
-// behavior where listeners die with the core (stop/restart).
+// behavior where listeners die with the core (stop/restart). A restart
+// rebinds a port whose old socket is still closing, so start is retried
+// briefly while both contexts are alive instead of failing once.
 func serveUntilDone(ctx, coreCtx context.Context, start func(context.Context) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stopCore := context.AfterFunc(coreCtx, cancel)
 	defer stopCore()
-	if err := start(ctx); err != nil {
+	var err error
+	for i := 0; i < 10; i++ {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err = start(ctx); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	if err != nil {
 		return err
 	}
 	<-ctx.Done()
