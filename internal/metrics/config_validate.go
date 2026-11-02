@@ -38,6 +38,7 @@ func splitValidationErrors(err error) []string {
 // configValidateHandler dry-runs YAML validation without touching disk.
 // It never calls backupConfigFile or os.WriteFile.
 func configValidateHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

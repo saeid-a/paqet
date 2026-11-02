@@ -58,3 +58,38 @@ func TestConfigValidateRejectsOversize(t *testing.T) {
 		t.Fatalf("want 400, got %d", rec.Code)
 	}
 }
+
+func TestConfigValidateSetsNoStore(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		body   string
+	}{
+		{"ok", http.MethodPost, `{"yaml":"role: bogus"}`}, // 422 path
+		{"bad-json", http.MethodPost, `not-json`},         // 400 path
+		{"wrong-method", http.MethodGet, ``},              // 405 path
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var req *http.Request
+			if tc.body == "" {
+				req = httptest.NewRequest(tc.method, "/api/config/validate", nil)
+			} else {
+				req = httptest.NewRequest(tc.method, "/api/config/validate", strings.NewReader(tc.body))
+			}
+			rec := httptest.NewRecorder()
+			configValidateHandler(rec, req)
+			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("want Cache-Control no-store, got %q", got)
+			}
+		})
+	}
+	// 200 path
+	payload, _ := json.Marshal(map[string]string{"yaml": fixTestYAML})
+	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", bytes.NewReader(payload))
+	rec := httptest.NewRecorder()
+	configValidateHandler(rec, req)
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("want Cache-Control no-store on 200, got %q", got)
+	}
+}
