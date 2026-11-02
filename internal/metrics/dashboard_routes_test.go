@@ -197,3 +197,18 @@ func TestDashboardForwardTestButton(t *testing.T) {
 		t.Fatal("probe path must not use innerHTML (XSS)")
 	}
 }
+
+func TestDashboardForwardSelect(t *testing.T) {
+	html, _ := os.ReadFile("dashboard.html")
+	s := string(html)
+	// Use button is created via setAttribute in inline JS; the banner is
+	// static HTML, so both the call form and the literal form are pinned.
+	for _, want := range []string{"listenerUse", `"fwd-use"`, `"fwd-active"`, "paqet-active-forward", "runtime-only", "confirm("} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	if strings.Contains(s, "innerHTML") {
+		t.Fatal("select path must not use innerHTML (XSS)")
+	}
+}

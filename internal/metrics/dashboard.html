@@ -207,6 +207,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="wrap"><table><thead><tr><th>target</th><th class="n">in</th><th class="n">out</th><th class="n">success</th><th class="n">fail</th><th>success-rate</th><th>avg-rtt</th><th>health</th></tr></thead><tbody id="tgtBody"></tbody></table>
 <div class="empty" id="tgtEmpty">no targets</div></div></div>
 <div class="panel"><h2>Listeners</h2>
+<div class="note hide" id="fwdActive" data-testid="fwd-active"></div>
 <div class="row"><button id="bLstRefresh">Refresh</button><span class="note" id="lstNote"></span></div>
 <div class="wrap"><table><thead><tr><th>listener</th><th>detail</th><th>state</th><th>action</th><th>test</th></tr></thead><tbody id="lstBody"></tbody></table>
 <div class="empty" id="lstEmpty">no listener data — open this tab to load</div></div></div>
@@ -1151,6 +1152,13 @@ var b=document.createElement("button");b.className="sub";b.textContent=it.runnin
 b.onclick=(function(id,act){return function(){listenerAction(id,act);};})(nm,it.running?"stop":"start");
 tdA.appendChild(b);
 }else{tdA.textContent="—";tdA.className="mono";}
+if(it&&typeof it==="object"&&String(it.type||"")==="forward"){
+var ub=document.createElement("button");ub.className="sub";ub.textContent="Use";
+ub.setAttribute("data-testid","fwd-use");ub.setAttribute("data-id",nm);
+ub.title="stop other forwards, start "+nm;
+ub.onclick=(function(id){return function(){listenerUse(id);};})(nm);
+tdA.appendChild(ub);
+}
 tr.appendChild(tdA);
 var tdT=document.createElement("td");
 if(it&&typeof it==="object"&&String(it.type||"")==="forward"){
@@ -1166,8 +1174,39 @@ tr.appendChild(tdT);
 tb.appendChild(tr);
 });
 }
-function loadListeners(){lstNote("");return api("api/listeners",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listeners endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var list=parseListeners(d);lastListeners=list;renderListeners(list);if(!list.length)lstNote("no listeners reported");try{renderHealth();}catch(e){}return list;}).catch(function(e){renderListeners([]);lstNote("listeners: "+e.message+" — continuing",true);return [];});}
+function loadListeners(){lstNote("");return api("api/listeners",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listeners endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var list=parseListeners(d);lastListeners=list;renderListeners(list);try{renderFwdActive();}catch(e){}if(!list.length)lstNote("no listeners reported");try{renderHealth();}catch(e){}return list;}).catch(function(e){renderListeners([]);try{renderFwdActive();}catch(x){}lstNote("listeners: "+e.message+" — continuing",true);return [];});}
 function listenerAction(id,action){lstNote(action+" "+id+"…");api("api/listeners/"+encodeURIComponent(id)+"/"+action,{method:"POST",cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listener control unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(){lstNote(action+" ok: "+id);loadListeners();}).catch(function(e){lstNote(action+" "+id+": "+e.message+" — continuing",true);});}
+// forward selection: stop other running forwards, start the chosen one.
+// Runtime-only until the config is Saved + Restarted; the choice persists
+// in localStorage so a reload restores the banner, not the core state.
+var fwdUseBusy=false;
+function renderFwdActive(){
+var el=$("fwdActive");if(!el)return;var sel=null;
+try{sel=localStorage.getItem("paqet-active-forward")||null;}catch(e){sel=null;}
+if(!sel){el.textContent="";el.classList.add("hide");return;}
+var found=null,list=lastListeners||[];
+for(var i=0;i<list.length;i++){var nm=list[i]&&(list[i].id||list[i].name);if(nm===sel){found=list[i];break;}}
+el.classList.remove("hide");
+if(found)el.textContent="active forward: "+sel+" · runtime-only until Saved + Restarted";
+else el.textContent="saved selection not found: "+sel+" — pick a forward below";
+}
+function listenerUse(id){
+if(fwdUseBusy){lstNote("switch already in progress — ignoring "+id,true);return;}
+var list=lastListeners||[];
+var fwd=list.filter(function(it){return it&&typeof it==="object"&&String(it.type||"")==="forward";});
+if(!fwd.length){lstNote("no forwards to select",true);return;}
+var target=null,running=0,i,nm;
+for(i=0;i<fwd.length;i++){nm=fwd[i].id||fwd[i].name;if(nm===id)target=fwd[i];if(fwd[i].running)running++;}
+if(!target){lstNote("saved selection not found: "+id+" — ignoring",true);return;}
+if(target.running&&running===1){try{localStorage.setItem("paqet-active-forward",id);}catch(e){}renderFwdActive();lstNote(id+" already the active forward — nothing to do");return;}
+if(!confirm("Route traffic via "+id+"? This stops the other forward listeners."))return;
+fwdUseBusy=true;lstNote("switching to "+id+"…");
+var stops=[];for(i=0;i<fwd.length;i++){nm=fwd[i].id||fwd[i].name;if(nm!==id&&fwd[i].running)stops.push(nm);}
+var chain=Promise.resolve();
+stops.forEach(function(n){chain=chain.then(function(){return api("api/listeners/"+encodeURIComponent(n)+"/stop",{method:"POST",cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("stop "+n+": http "+r.status);});});});
+if(!target.running){chain=chain.then(function(){return api("api/listeners/"+encodeURIComponent(id)+"/start",{method:"POST",cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("start "+id+": http "+r.status);});});}
+chain.then(function(){try{localStorage.setItem("paqet-active-forward",id);}catch(e){}renderFwdActive();loadListeners();lstNote("active forward: "+id);}).catch(function(e){lstNote("switch failed: "+String((e&&e.message)||e),true);}).finally(function(){fwdUseBusy=false;});
+}
 $("bLstRefresh").onclick=function(){loadListeners();};
 function logLvlNote(m,warn){var e=$("logLvlNote");if(!e)return;e.textContent=m||"";e.className="note"+(warn?" warn":"");}
 function loadLogLevel(){return api("api/log",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("log level endpoint unavailable");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var lv=String((d&&d.level)||"").toLowerCase();var sel=$("logSetLevel");if(sel&&lv){for(var i=0;i<sel.options.length;i++)if(sel.options[i].value===lv){sel.value=lv;break;}}return lv;}).catch(function(){return "";});}
