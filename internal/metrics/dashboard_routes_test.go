@@ -20,3 +20,11 @@ func TestDashboardFirewallPathMatchesServer(t *testing.T) {
 		t.Fatalf("dashboard missing api/net/firewall call")
 	}
 }
+
+func TestDashboardHasPostureCard(t *testing.T) {
+	html, _ := os.ReadFile("dashboard.html")
+	s := string(html)
+	if !strings.Contains(s, "api/safety/posture") { t.Fatal("missing posture fetch") }
+	if !strings.Contains(s, `id="postureCard"`) { t.Fatal("missing #postureCard") }
+	if !strings.Contains(s, `id="exposureBanner"`) { t.Fatal("missing #exposureBanner") }
+}
