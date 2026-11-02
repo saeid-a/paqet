@@ -345,6 +345,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="panel"><h2>Client iptables fix</h2>
 <div class="row"><button id="bSetupCliCopy" class="sub">Copy</button></div>
 <pre id="setupClientFix" class="mono">loading…</pre></div>
+<div class="panel"><h2>Remote access</h2><div class="row"><button id="bGenToken">Generate token</button><button id="bSshCopy" class="sub">Copy SSH cmd</button></div><pre id="sshSnippet" class="mono">…</pre><div class="note">paste token into admin.token, save + restart; never share in chat</div></div>
 </section>
 
 <div id="modal" class="hide"><div id="modalBox"><div id="modalHead"><b>Connection detail</b><span style="flex:1"></span><button id="modalX" class="sub">Close</button></div><div id="modalBody" class="mono"></div></div></div>
@@ -380,7 +381,7 @@ function api(p,o){o=o||{};o.headers=authH(o.headers||{});return fetch(p,o);}
 // tabs
 var TABS=["overview","conns","targets","config","logs","diag","setup"];
 var tabs=document.querySelectorAll("button.tab");
-function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();}if(t==="diag")loadIfaces(true);if(t==="setup")loadPreflight();if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview"){loadPosture();loadRuntime();}}
+function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();}if(t==="diag")loadIfaces(true);if(t==="setup"){loadPreflight();loadPosture();}if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview"){loadPosture();loadRuntime();}}
 tabs.forEach(function(b){b.onclick=function(){showTab(b.dataset.t);};});
 document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=7)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
 // modal drawer
@@ -571,6 +572,7 @@ var bn=$("exposureBanner");if(!bn)return;
 if(ex==="critical"){bn.className="note";bn.style.border="1px solid var(--red)";bn.style.color="var(--red)";bn.textContent="Exposed: non-loopback without token \u2014 set admin.token + TLS, bind 127.0.0.1";bn.classList.remove("hide");}
 else if(ex==="warn"){bn.className="note warn";bn.style.border="";bn.style.color="";bn.textContent="Loopback without token \u2014 anyone on this host can edit config";bn.classList.remove("hide");}
 else bn.classList.add("hide");
+try{renderSshSnippet(p.bind);}catch(e){}
 }
 function loadPosture(){return api("api/safety/posture",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){renderPosture(d||{});}).catch(function(){});}
 function loadRuntime(){return api("api/runtime",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){d=d||{};var g=d.goroutines;var heap=d.mem_heap_bytes!=null?d.mem_heap_bytes:d.mem_alloc_bytes;var sys=d.mem_sys_bytes;var gc=d.mem_gc_cycles;var gv=d.go_version||"";var os=d.goos||"",arch=d.goarch||"";var cpu=d.num_cpu;var el=$("rtDetailBody");if(el)el.textContent=fmtInt(g)+" \u00b7 heap "+fmtBytes(heap)+" / sys "+fmtBytes(sys)+" \u00b7 gc "+fmtInt(gc)+" \u00b7 "+gv+" "+os+"/"+arch+" \u00b7 cpu "+fmtInt(cpu);}).catch(function(){var el=$("rtDetailBody");if(el)el.textContent="unavailable \u2014 continuing";});}
@@ -1025,6 +1027,16 @@ function setupNote(m,warn){var e=$("setupNote");if(!e)return;e.textContent=m||""
 function loadPreflight(){setupNote("loading preflight…");return api("api/safety/preflight",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("preflight endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){d=d||{};renderChecks(d.checks||[]);setT("setupServerFix",(d.server_fix&&d.server_fix.length)?d.server_fix.join("\n"):"no server rules — firewall already satisfied");setT("setupClientFix",(d.client_fix&&d.client_fix.length)?d.client_fix.join("\n"):"no client rules for this role/config");var fw=d.firewall||{};if(fw.supported===false){setupNote("firewall unsupported on this OS — manual steps in README",true);}else{var n=(d.checks||[]).length;setupNote("role="+(d.role||"unknown")+" · "+n+" check(s)"+((!d.checks||!d.checks.length)?" — continuing":""));}return d;}).catch(function(e){renderChecks([]);setupNote("preflight: "+e.message+" — continuing",true);return null;});}
 $("bSetupSrvCopy").onclick=function(){copyText($("setupServerFix").textContent);setupNote("server fix copied");};
 $("bSetupCliCopy").onclick=function(){copyText($("setupClientFix").textContent);setupNote("client fix copied");};
+// remote access (harden): token generator + SSH snippet. Token value is
+// rendered only via textContent and never logged; SSH cmd derives from
+// the posture bind so it tracks the actual admin listen address.
+var sshBind="127.0.0.1:9090";
+function sshCmd(b){return "ssh -N -L 9090:"+(b||sshBind)+" user@host  # then open http://127.0.0.1:9090";}
+function renderSshSnippet(b){if(b)sshBind=String(b);var el=$("sshSnippet");if(!el)return;var cur=String(el.textContent||"");var m=cur.match(/^token: \S+\n/);el.textContent=(m?m[0]:"")+sshCmd(sshBind);}
+function genToken(){var t="";try{var b=new Uint8Array(32);crypto.getRandomValues(b);for(var i=0;i<b.length;i++)t+=("0"+b[i].toString(16)).slice(-2);}catch(e){var cs="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";for(var j=0;j<16;j++)t+=cs.charAt(Math.floor(Math.random()*cs.length));}var f=$("fToken");if(f)f.value=t;var el=$("sshSnippet");if(el)el.textContent="token: "+t+"\n"+sshCmd(sshBind);return t;}
+$("bGenToken").onclick=function(){genToken();setupNote("token generated — paste into admin.token, save + restart");};
+$("bSshCopy").onclick=function(){var el=$("sshSnippet");copyText(el?el.textContent:"");setupNote("SSH cmd copied");};
+try{renderSshSnippet();}catch(e){}
 $("q").addEventListener("input",applyFilter);
 try{$("connGone").addEventListener("change",function(){showGone=this.checked;applyFilter();});}catch(e){}
 fitCanvas();poll();driftLoop();sseInit();
