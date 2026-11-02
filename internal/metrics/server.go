@@ -986,11 +986,27 @@ func listenersHandler(w http.ResponseWriter, r *http.Request) {
 	var listeners []map[string]any
 	if c := getController(); c.Listeners != nil {
 		names := c.Listeners()
+		// Merge static config metadata (type/listen/target/protocol) into
+		// registry entries so the panel can show and test forward targets.
+		// Registry IDs are "forward:<listen>" / "socks5:<listen>".
+		meta := map[string]map[string]any{}
+		for _, e := range configListeners() {
+			if l, _ := e["listen"].(string); l != "" {
+				meta[l] = e
+			}
+		}
 		listeners = make([]map[string]any, 0, len(names))
 		for _, n := range names {
 			entry := map[string]any{"id": n, "name": n}
 			if c.ListenerRunning != nil {
 				entry["running"] = c.ListenerRunning(n)
+			}
+			if i := strings.Index(n, ":"); i > 0 {
+				if m, ok := meta[n[i+1:]]; ok {
+					for k, v := range m {
+						entry[k] = v
+					}
+				}
 			}
 			listeners = append(listeners, entry)
 		}
