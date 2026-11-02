@@ -23,6 +23,7 @@ func New(cfg *conf.Conf) (*Server, error) {
 
 func (s *Server) Start(ctx context.Context) error {
 	metrics.SetRole(s.cfg.Role)
+	kcp.EnsureStatsLoop()
 
 	listener, err := kcp.Listen(s.cfg.Transport.KCP, s.cfg.Network)
 	if err != nil {

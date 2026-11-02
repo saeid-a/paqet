@@ -119,3 +119,16 @@ func StartStatsLoop(stop <-chan struct{}) {
 		}
 	}
 }
+
+var statsLoopOnce sync.Once
+
+// EnsureStatsLoop starts the process-wide 2s sampler once; subsequent
+// calls are no-ops. Called from server and client Start so live KCP/SNMP
+// values flow into metrics without metrics importing this package
+// (which would be an import cycle).
+func EnsureStatsLoop() {
+	statsLoopOnce.Do(func() {
+		ch := make(chan struct{})
+		go StartStatsLoop(ch)
+	})
+}
