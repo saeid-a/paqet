@@ -112,6 +112,23 @@ func FirewallCheck(port int) FirewallResult {
 	return res
 }
 
+// ClientFirewallFix returns the two operator-applied iptables rules that
+// suppress the client's own-kernel RSTs for traffic with the server at
+// serverIP:port. Scoped to the server tuple so unrelated traffic keeps
+// normal reset behavior. Returns nil for an invalid IP or port. No exec.
+func ClientFirewallFix(serverIP string, port int) []string {
+	if net.ParseIP(serverIP) == nil {
+		return nil
+	}
+	if port < 1 || port > 65535 {
+		return nil
+	}
+	return []string{
+		fmt.Sprintf("sudo iptables -t raw -A PREROUTING -s %s -p tcp --sport %d -j NOTRACK", serverIP, port),
+		fmt.Sprintf("sudo iptables -t mangle -A OUTPUT -d %s -p tcp --dport %d --tcp-flags RST RST -j DROP", serverIP, port),
+	}
+}
+
 // firewallRulesPresent reports which expected rules appear in combined
 // iptables -S output. Matches on "--dport <port>" / "--sport <port>" with a
 // trailing-digit guard so port 80 does not match a rule for 8080.

@@ -21,3 +21,14 @@ func TestFirewallPortBoundary(t *testing.T) {
 		t.Fatalf("port 8080 must match its own rules, got dport=%v sport=%v rst=%v", hasDport, hasSport, hasRST)
 	}
 }
+
+func TestClientFirewallFixScopedToServer(t *testing.T) {
+	fix := ClientFirewallFix("10.0.0.100", 9999)
+	joined := strings.Join(fix, "\n")
+	if !strings.Contains(joined, "10.0.0.100") {
+		t.Fatalf("fix must scope to server IP, got %q", joined)
+	}
+	if !strings.Contains(joined, "9999") {
+		t.Fatalf("fix must contain port, got %q", joined)
+	}
+}
