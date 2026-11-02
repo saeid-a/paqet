@@ -41,6 +41,7 @@ func (s *Server) handleUDP(ctx context.Context, strm tnet.Strm, addr string) {
 			flog.Errorf("UDP stream %d failed for %s -> %s: %v", strm.SID(), conn.RemoteAddr(), addr, err)
 			metrics.IncFailure()
 			metrics.IncFailureUDP()
+			return
 		}
 	case <-ctx.Done():
 	}
