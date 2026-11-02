@@ -28,3 +28,11 @@ func TestDashboardHasPostureCard(t *testing.T) {
 	if !strings.Contains(s, `id="postureCard"`) { t.Fatal("missing #postureCard") }
 	if !strings.Contains(s, `id="exposureBanner"`) { t.Fatal("missing #exposureBanner") }
 }
+
+func TestDashboardHasSetupTab(t *testing.T) {
+	html, _ := os.ReadFile("dashboard.html")
+	s := string(html)
+	for _, want := range []string{`data-t="setup"`, `id="t-setup"`, "api/safety/preflight", "copyText"} {
+		if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+	}
+}

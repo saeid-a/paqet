@@ -125,6 +125,8 @@ button:focus-visible{outline:none;border-color:var(--blu);box-shadow:0 0 0 3px r
 #modalHead{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px}
 #modalBody{padding:10px 12px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all}
 #diagOut{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;background:var(--inp);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-height:60px;margin-top:8px}
+#setupServerFix,#setupClientFix{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;background:var(--inp);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-height:40px}
+.pill{border:1px solid var(--line);border-radius:10px;padding:1px 8px;font-size:11px;text-transform:uppercase}
 tbody tr.clickable{cursor:pointer}
 tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 .chk{font-size:12px;color:var(--dim);display:inline-flex;gap:5px;align-items:center}
@@ -161,6 +163,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <button class="tab" data-t="config">4 Config</button>
 <button class="tab" data-t="logs">5 Logs</button>
 <button class="tab" data-t="diag">6 Diag</button>
+<button class="tab" data-t="setup">7 Setup</button>
 </nav>
 
 <section id="t-overview">
@@ -327,6 +330,19 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 </div>
 </section>
 
+<section id="t-setup" class="hide">
+<div class="panel"><h2>Setup / preflight</h2>
+<div class="note" id="setupNote"></div>
+<div class="wrap"><table><thead><tr><th>check</th><th>status</th><th>detail</th><th>fix</th></tr></thead><tbody id="setupBody"></tbody></table>
+<div class="empty" id="setupEmpty">no preflight data — open this tab to load</div></div></div>
+<div class="panel"><h2>Server iptables fix</h2>
+<div class="row"><button id="bSetupSrvCopy" class="sub">Copy</button></div>
+<pre id="setupServerFix" class="mono">loading…</pre></div>
+<div class="panel"><h2>Client iptables fix</h2>
+<div class="row"><button id="bSetupCliCopy" class="sub">Copy</button></div>
+<pre id="setupClientFix" class="mono">loading…</pre></div>
+</section>
+
 <div id="modal" class="hide"><div id="modalBox"><div id="modalHead"><b>Connection detail</b><span style="flex:1"></span><button id="modalX" class="sub">Close</button></div><div id="modalBody" class="mono"></div></div></div>
 
 <footer class="mono" id="ts"></footer>
@@ -358,11 +374,11 @@ $("tok").addEventListener("input",function(){try{sessionStorage.setItem("paqet-t
 function authH(h){h=h||{};try{var t=sessionStorage.getItem("paqet-token")||"";if(t)h["Authorization"]="Bearer "+t;}catch(e){}return h;}
 function api(p,o){o=o||{};o.headers=authH(o.headers||{});return fetch(p,o);}
 // tabs
-var TABS=["overview","conns","targets","config","logs","diag"];
+var TABS=["overview","conns","targets","config","logs","diag","setup"];
 var tabs=document.querySelectorAll("button.tab");
-function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();}if(t==="diag")loadIfaces(true);if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview")loadPosture();}
+function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();}if(t==="diag")loadIfaces(true);if(t==="setup")loadPreflight();if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview")loadPosture();}
 tabs.forEach(function(b){b.onclick=function(){showTab(b.dataset.t);};});
-document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=6)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
+document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=7)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
 // modal drawer
 function openModal(c){setT("modalBody",JSON.stringify(c,null,2));$("modal").classList.remove("hide");}
 $("modalX").onclick=function(){$("modal").classList.add("hide");};
@@ -933,6 +949,16 @@ function logLvlNote(m,warn){var e=$("logLvlNote");if(!e)return;e.textContent=m||
 function loadLogLevel(){return api("api/log",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("log level endpoint unavailable");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var lv=String((d&&d.level)||"").toLowerCase();var sel=$("logSetLevel");if(sel&&lv){for(var i=0;i<sel.options.length;i++)if(sel.options[i].value===lv){sel.value=lv;break;}}return lv;}).catch(function(){return "";});}
 $("bLogSet").onclick=function(){var lv=$("logSetLevel").value;if(!lv){logLvlNote("pick a level first",true);return;}logLvlNote("setting…");api("api/log",{method:"POST",body:JSON.stringify({level:lv}),cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(){logLvlNote("level: "+lv);pollLogs();}).catch(function(e){logLvlNote("set level: "+e.message,true);});};
 $("bDump").onclick=function(){var p=($("fwPort").value||"").trim()||"9999";diagSay("dump capture on port "+p+"…");api("api/diag/dump",{method:"POST",body:JSON.stringify({port:parseInt(p,10)||9999,count:10}),cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("dump endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(t){diagSay("dump port "+p+":\n"+t);try{var b=new Blob([t],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="paqet-dump-"+p+".json";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);}catch(e){}}).catch(function(e){diagSay("dump: "+e.message+" — endpoint may not exist; continuing.");});};
+// setup/preflight: role-aware checklist + copy-paste firewall fixes.
+// Same api() auth wrapper; tolerate 404/501 with a continuing note.
+function copyText(t){t=String(t==null?"":t);if(!t)return;try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).catch(function(){copyTextFallback(t);});return;}}catch(e){}copyTextFallback(t);}
+function copyTextFallback(t){try{var ta=document.createElement("textarea");ta.value=t;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();try{document.execCommand("copy");}catch(e){}ta.remove();}catch(e){}}
+function setupPill(st){st=String(st||"unknown");var s=document.createElement("span");s.textContent=st;s.className="pill mono "+(st==="pass"?"ok-t":st==="fail"?"bad-t":"");if(st==="warn")s.style.color="var(--amber)";if(st==="unknown")s.style.color="var(--dim)";return s;}
+function renderChecks(list){var tb=$("setupBody");if(!tb)return;while(tb.firstChild)tb.removeChild(tb.firstChild);list=list||[];$("setupEmpty").style.display=list.length?"none":"block";list.slice(0,50).forEach(function(c){var tr=document.createElement("tr");var tdN=document.createElement("td");tdN.textContent=c.label||c.id||"?";tdN.className="mono";tr.appendChild(tdN);var tdS=document.createElement("td");tdS.appendChild(setupPill(c.status));tr.appendChild(tdS);var tdD=document.createElement("td");tdD.textContent=c.detail||"";tdD.className="mono";tdD.style.whiteSpace="normal";tr.appendChild(tdD);var tdF=document.createElement("td");tdF.textContent=c.fix||"—";tdF.className="mono";tdF.style.whiteSpace="normal";tr.appendChild(tdF);tb.appendChild(tr);});}
+function setupNote(m,warn){var e=$("setupNote");if(!e)return;e.textContent=m||"";e.className="note"+(warn?" warn":"");}
+function loadPreflight(){setupNote("loading preflight…");return api("api/safety/preflight",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("preflight endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){d=d||{};renderChecks(d.checks||[]);setT("setupServerFix",(d.server_fix&&d.server_fix.length)?d.server_fix.join("\n"):"no server rules — firewall already satisfied");setT("setupClientFix",(d.client_fix&&d.client_fix.length)?d.client_fix.join("\n"):"no client rules for this role/config");var fw=d.firewall||{};if(fw.supported===false){setupNote("firewall unsupported on this OS — manual steps in README",true);}else{var n=(d.checks||[]).length;setupNote("role="+(d.role||"unknown")+" · "+n+" check(s)"+((!d.checks||!d.checks.length)?" — continuing":""));}return d;}).catch(function(e){renderChecks([]);setupNote("preflight: "+e.message+" — continuing",true);return null;});}
+$("bSetupSrvCopy").onclick=function(){copyText($("setupServerFix").textContent);setupNote("server fix copied");};
+$("bSetupCliCopy").onclick=function(){copyText($("setupClientFix").textContent);setupNote("client fix copied");};
 $("q").addEventListener("input",applyFilter);
 try{$("connGone").addEventListener("change",function(){showGone=this.checked;applyFilter();});}catch(e){}
 fitCanvas();poll();driftLoop();sseInit();
