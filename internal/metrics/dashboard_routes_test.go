@@ -171,3 +171,12 @@ func TestDashboardTransportHintGuardsMissingQueues(t *testing.T) {
     s := string(html)
     if !strings.Contains(s, "sq!=null&&rq!=null") { t.Fatal("renderTransport must guard missing snd_queue/rcv_queue before claiming queues clear") }
 }
+
+func TestDashboardHasProbeLab(t *testing.T) {
+    html, _ := os.ReadFile("dashboard.html")
+    s := string(html)
+    for _, want := range []string{`id="probeHost"`, `id="probePort"`, `id="probeResults"`, `id="probeHistory"`, "runProbe", "api/diag/dial", "api/diag/speedtest", "api/diag/results", "textContent"} {
+        if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+    }
+    if strings.Contains(s, "innerHTML") { t.Fatal("probe path must not use innerHTML (XSS)") }
+}

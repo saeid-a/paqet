@@ -338,6 +338,21 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="empty" id="ifaceEmpty">no interface data — open this tab to load</div></div>
 <div id="diagOut">diag output appears here.</div>
 </div>
+<div class="panel"><h2>Probe lab</h2>
+<div class="row">
+<input type="text" id="probeHost" placeholder="host, e.g. 203.0.113.7" style="max-width:200px">
+<input type="number" id="probePort" placeholder="port" style="max-width:90px">
+<input type="text" id="probeLabel" placeholder="label, e.g. before-preset" style="max-width:170px">
+<button id="bDial">Dial</button>
+<button id="bUdp">UDP echo</button>
+<button id="bMtu">MTU</button>
+<button id="bSpeed">Speedtest 10s</button>
+</div>
+<div class="note" id="probeNote"></div>
+<div class="mono" id="probeResults" style="white-space:pre-wrap">no probe run yet.</div>
+<div class="wrap"><table><thead><tr><th>when</th><th>probe</th><th>result</th></tr></thead><tbody id="probeHistory"></tbody></table>
+<div class="empty" id="probeEmpty">no probe history — run a probe to compare before/after</div></div>
+</div>
 </section>
 
 <section id="t-setup" class="hide">
@@ -388,7 +403,7 @@ function api(p,o){o=o||{};o.headers=authH(o.headers||{});return fetch(p,o);}
 var TABS=["overview","conns","targets","config","logs","diag","setup"];
 var tabs=document.querySelectorAll("button.tab");
 function tabFromHash(){try{var h=String(location.hash||"").replace(/^#\/?/,"").split("?")[0];if(TABS.indexOf(h)>=0)return h;}catch(e){}return null;}
-function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();loadAudit();}if(t==="diag")loadIfaces(true);if(t==="setup"){loadPreflight();loadPosture();}if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview"){loadPosture();loadRuntime();}try{if(tabFromHash()!==t)location.hash=t;}catch(e){}}
+function showTab(t){tabs.forEach(function(x){x.classList.toggle("on",x.dataset.t===t);});TABS.forEach(function(k){$("t-"+k).classList.toggle("hide",k!==t);});if(t==="config")loadCfg(false);if(t==="logs"){pollLogs();loadLogLevel();loadAudit();}if(t==="diag"){loadIfaces(true);try{loadProbeHistory();}catch(e){}}if(t==="setup"){loadPreflight();loadPosture();}if(t==="targets"){if(lastStatus)renderTargets(lastStatus);loadListeners();}if(t==="overview"){loadPosture();loadRuntime();}try{if(tabFromHash()!==t)location.hash=t;}catch(e){}}
 tabs.forEach(function(b){b.onclick=function(){showTab(b.dataset.t);};});
 window.addEventListener("hashchange",function(){var h=tabFromHash();if(h)showTab(h);});
 document.addEventListener("keydown",function(e){if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||""))return;var n=parseInt(e.key,10);if(n>=1&&n<=7)showTab(TABS[n-1]);if(e.key==="Escape")$("modal").classList.add("hide");});
@@ -1134,6 +1149,18 @@ function logLvlNote(m,warn){var e=$("logLvlNote");if(!e)return;e.textContent=m||
 function loadLogLevel(){return api("api/log",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("log level endpoint unavailable");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var lv=String((d&&d.level)||"").toLowerCase();var sel=$("logSetLevel");if(sel&&lv){for(var i=0;i<sel.options.length;i++)if(sel.options[i].value===lv){sel.value=lv;break;}}return lv;}).catch(function(){return "";});}
 $("bLogSet").onclick=function(){var lv=$("logSetLevel").value;if(!lv){logLvlNote("pick a level first",true);return;}logLvlNote("setting…");api("api/log",{method:"POST",body:JSON.stringify({level:lv}),cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(){logLvlNote("level: "+lv);pollLogs();}).catch(function(e){logLvlNote("set level: "+e.message,true);});};
 $("bDump").onclick=function(){var p=($("fwPort").value||"").trim()||"9999";diagSay("dump capture on port "+p+"…");api("api/diag/dump",{method:"POST",body:JSON.stringify({port:parseInt(p,10)||9999,count:10}),cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("dump endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(t){diagSay("dump port "+p+":\n"+t);try{var b=new Blob([t],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="paqet-dump-"+p+".json";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},500);}catch(e){}}).catch(function(e){diagSay("dump: "+e.message+" — endpoint may not exist; continuing.");});};
+// probe lab: outward dial/udp/mtu plus through-tunnel speedtest with KCP
+// deltas. All rendering via textContent; history compares before/after.
+function probeNote(m,warn){var e=$("probeNote");if(!e)return;e.textContent=m||"";e.className="note"+(warn?" warn":"");}
+function probeTarget(){var h=($("probeHost").value||"").trim(),p=parseInt(($("probePort").value||"").trim(),10),l=($("probeLabel").value||"").trim();return{host:h,port:p,label:l};}
+function probeSay(s){var e=$("probeResults");if(e)e.textContent=s;}
+function renderProbeHistory(list){var tb=$("probeHistory");if(!tb)return;while(tb.firstChild)tb.removeChild(tb.firstChild);list=list||[];$("probeEmpty").style.display=list.length?"none":"block";list.slice(0,20).forEach(function(e){var tr=document.createElement("tr");var tdW=document.createElement("td");tdW.textContent=String(e.at||"");tdW.className="mono";tr.appendChild(tdW);var tdK=document.createElement("td");tdK.textContent=String(e.kind||"?")+((e.label)?(" · "+e.label):"");tdK.className="mono";tr.appendChild(tdK);var tdS=document.createElement("td");tdS.textContent=String(e.summary||"");tdS.className="mono";tdS.style.whiteSpace="normal";tr.appendChild(tdS);tb.appendChild(tr);});}
+function loadProbeHistory(){return api("api/diag/results",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("results endpoint unavailable");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var list=(d&&d.entries)||[];renderProbeHistory(list);return list;}).catch(function(e){probeNote("history: "+e.message+" — continuing",true);return [];});}
+function runProbe(kind){var t=probeTarget();if(!t.host){probeNote("enter a host first",true);return;}if(!(t.port>=1&&t.port<=65535)){probeNote("enter a port 1-65535",true);return;}var url="",body={};if(kind==="dial"){url="api/diag/dial";body={host:t.host,port:t.port,timeout_sec:5,label:t.label};}else if(kind==="udp"){url="api/diag/udp";body={host:t.host,port:t.port,timeout_sec:5,bytes:32,label:t.label};}else if(kind==="mtu"){url="api/diag/mtu";body={host:t.host,port:t.port,label:t.label};}else{url="api/diag/speedtest";body={duration_sec:10,mode:"up",label:t.label};}probeNote(kind+"…");probeSay(kind+" running…");api(url,{method:"POST",body:JSON.stringify(body),cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error(kind+" endpoint unavailable (http "+r.status+")");if(r.status===409||r.status===429){return r.json().then(function(d){throw new Error((d&&d.error)||("busy (http "+r.status+")"));});}if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){probeSay(kind+" ok:\n"+JSON.stringify(d,null,2));probeNote(kind+" ok");loadProbeHistory();}).catch(function(e){probeSay(kind+": "+e.message);probeNote(kind+": "+e.message,true);});}
+$("bDial").onclick=function(){runProbe("dial");};
+$("bUdp").onclick=function(){runProbe("udp");};
+$("bMtu").onclick=function(){runProbe("mtu");};
+$("bSpeed").onclick=function(){runProbe("speedtest");};
 // setup/preflight: role-aware checklist + copy-paste firewall fixes.
 // Same api() auth wrapper; tolerate 404/501 with a continuing note.
 function copyText(t){t=String(t==null?"":t);if(!t)return;try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).catch(function(){copyTextFallback(t);});return;}}catch(e){}copyTextFallback(t);}
