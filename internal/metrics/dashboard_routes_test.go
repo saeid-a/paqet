@@ -129,3 +129,11 @@ func TestDashboardHasTabDeepLink(t *testing.T) {
         if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
     }
 }
+
+func TestDashboardHasSecondSparkline(t *testing.T) {
+    html, _ := os.ReadFile("dashboard.html")
+    s := string(html)
+    for _, want := range []string{`id="spark2"`, "histConn", "drawConn"} {
+        if !strings.Contains(s, want) { t.Fatalf("missing %q", want) }
+    }
+}
