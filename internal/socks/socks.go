@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"paqet/internal/client"
@@ -16,6 +17,51 @@ type Server struct {
 	client   *client.Client
 	username string
 	password string
+	// egressSpec is the configured exit: "" = direct (respect the app's
+	// requested destination), otherwise a fixed "host:port". Dynamic
+	// specs ("@active", "forward:<listen>") are resolved at dial time
+	// via resolve, which the supervisor installs; resolve returning ""
+	// falls back to direct.
+	egressSpec atomic.Value // string
+	resolveMu  atomic.Value // func() string
+}
+
+func (s *Server) SetEgress(spec string) { s.egressSpec.Store(spec) }
+
+func (s *Server) Egress() string {
+	if v, ok := s.egressSpec.Load().(string); ok {
+		return v
+	}
+	return ""
+}
+
+// SetEgressSpec installs a (possibly dynamic) egress spec with a resolver
+// for "@active"/"forward:" specs. A nil resolve means the spec is literal.
+func (s *Server) SetEgressSpec(spec string, resolve func() string) {
+	s.egressSpec.Store(spec)
+	if resolve != nil {
+		s.resolveMu.Store(resolve)
+	}
+}
+
+// effectiveTarget returns the tunnel dial target for a SOCKS request:
+// the egress override when one resolves, else the requested destination.
+func (s *Server) effectiveTarget(requested string) string {
+	spec := s.Egress()
+	if spec == "" {
+		return requested
+	}
+	if r, ok := s.resolveMu.Load().(func() string); ok && r != nil {
+		if resolved := r(); resolved != "" {
+			return resolved
+		}
+		// Unresolvable dynamic spec (no active forward): fall through to
+		// the literal spec only when it is itself a dialable target.
+		if spec == "@active" || (len(spec) > 8 && spec[:8] == "forward:") {
+			return requested
+		}
+	}
+	return spec
 }
 
 func New(client *client.Client) (*Server, error) {

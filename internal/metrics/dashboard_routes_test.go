@@ -232,3 +232,37 @@ func TestDashboardListenersLiveInConfig(t *testing.T) {
 		t.Fatal("config tab should load config and listeners")
 	}
 }
+
+func TestDashboardSocksEgress(t *testing.T) {
+	html, _ := os.ReadFile("dashboard.html")
+	s := string(html)
+	// SOCKS egress controls: dropdown + custom field + Test/Set wired to
+	// the per-listener egress endpoint, resolved target merged per row.
+	for _, want := range []string{
+		"listenerSocksTest", "listenerSocksSet", "socksEffectiveTarget",
+		"socks-egress", "socks-egress-test", "socks-egress-set", "socks-egress-result",
+		"socks-egress-custom", "socks-egress-current",
+		"api/listeners/", "/egress", "egress_target", "Follow active forward",
+		"no SOCKS listener", "SOCKS follower",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	if strings.Contains(s, "innerHTML") {
+		t.Fatal("egress path must not use innerHTML (XSS)")
+	}
+}
+
+func TestDashboardSocksFormEgress(t *testing.T) {
+	html, _ := os.ReadFile("dashboard.html")
+	s := string(html)
+	// Config form carries the egress suffix so Apply-to-YAML preserves it.
+	for _, want := range []string{
+		"parseSocksLines", "-> egress", "egress: ", "validEgress",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+}

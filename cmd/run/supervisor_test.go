@@ -103,3 +103,84 @@ func TestTunnelProbeDelegates(t *testing.T) {
 		t.Fatalf("got (%d, %v)", ms, spoke)
 	}
 }
+
+func TestSocksEgressUnwired(t *testing.T) {
+	sup := newSupervisor(t.TempDir()+"/client.yaml", func(ctx context.Context, c *conf.Conf) error { return nil })
+	if err := sup.SetSocksEgress("socks5:127.0.0.1:1080", "@active"); err == nil {
+		t.Fatal("want error for unknown listener, got nil")
+	}
+}
+
+func TestSocksEgressRejectsBadSpec(t *testing.T) {
+	sup := newSupervisor(t.TempDir()+"/client.yaml", func(ctx context.Context, c *conf.Conf) error { return nil })
+	sup.trackSocksServer("socks5:127.0.0.1:1080", nil, "")
+	if err := sup.SetSocksEgress("socks5:127.0.0.1:1080", "@bogus"); err == nil {
+		t.Fatal("want error for bad spec, got nil")
+	}
+	if err := sup.SetSocksEgress("forward:127.0.0.1:18081", "@active"); err == nil {
+		t.Fatal("want error for non-socks listener, got nil")
+	}
+}
+
+func TestSocksEgressRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	sup := newSupervisor(dir+"/client.yaml", func(ctx context.Context, c *conf.Conf) error { return nil })
+	sup.trackSocksServer("socks5:127.0.0.1:1080", nil, "")
+	if err := sup.SetSocksEgress("socks5:127.0.0.1:1080", "127.0.0.1:5005"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	spec, resolved := sup.SocksEgress("socks5:127.0.0.1:1080")
+	if spec != "127.0.0.1:5005" || resolved != "127.0.0.1:5005" {
+		t.Fatalf("got (%q, %q)", spec, resolved)
+	}
+}
+
+func TestResolveSocksEgressPinned(t *testing.T) {
+	sup := newSupervisor(t.TempDir()+"/client.yaml", func(ctx context.Context, c *conf.Conf) error { return nil })
+	sup.setForwardTargets(map[string]string{"127.0.0.1:18081": "127.0.0.1:5005"})
+	if got := sup.resolveSocksEgress("forward:127.0.0.1:18081"); got != "127.0.0.1:5005" {
+		t.Fatalf("pinned = %q", got)
+	}
+	if got := sup.resolveSocksEgress("forward:127.0.0.1:9"); got != "" {
+		t.Fatalf("unknown forward = %q, want empty", got)
+	}
+	if got := sup.resolveSocksEgress(""); got != "" {
+		t.Fatalf("direct = %q, want empty", got)
+	}
+	if got := sup.resolveSocksEgress("127.0.0.1:5005"); got != "127.0.0.1:5005" {
+		t.Fatalf("custom = %q", got)
+	}
+}
+
+func TestResolveSocksEgressFollowsActive(t *testing.T) {
+	sup := newSupervisor(t.TempDir()+"/client.yaml", func(ctx context.Context, c *conf.Conf) error { return nil })
+	sup.setForwardTargets(map[string]string{
+		"127.0.0.1:18081": "127.0.0.1:5005",
+		"127.0.0.1:18082": "127.0.0.1:6006",
+	})
+	noop := func(ctx context.Context) error { <-ctx.Done(); return nil }
+	// No forwards running: unresolvable, direct fallback.
+	if got := sup.resolveSocksEgress("@active"); got != "" {
+		t.Fatalf("no forwards = %q, want empty", got)
+	}
+	sup.RegisterListener("forward:127.0.0.1:18081", noop)
+	sup.RegisterListener("forward:127.0.0.1:18082", noop)
+	if err := sup.StartListener("forward:127.0.0.1:18081"); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if got := sup.resolveSocksEgress("@active"); got != "127.0.0.1:5005" {
+		t.Fatalf("sole forward = %q", got)
+	}
+	if err := sup.StartListener("forward:127.0.0.1:18082"); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if got := sup.resolveSocksEgress("@active"); got != "" {
+		t.Fatalf("two forwards = %q, want empty (ambiguous)", got)
+	}
+	if err := sup.StopListener("forward:127.0.0.1:18082"); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if got := sup.resolveSocksEgress("@active"); got != "127.0.0.1:5005" {
+		t.Fatalf("after stop = %q", got)
+	}
+}

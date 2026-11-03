@@ -114,7 +114,7 @@ func (s *Server) udpToStrm(ctx context.Context, a *associate, d *datagram) {
 		return
 	}
 
-	strm, new, k, err := s.client.UDP(ctx, a.cAddr.String(), d.address())
+	strm, new, k, err := s.client.UDP(ctx, a.cAddr.String(), s.effectiveTarget(d.address()))
 	if err != nil {
 		flog.Errorf("SOCKS5 failed to establish UDP stream for %s -> %s: %v", a.cAddr, d.address(), err)
 		metrics.IncFailure()

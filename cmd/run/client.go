@@ -76,13 +76,20 @@ func startDataPlaneListeners(coreCtx context.Context, sup *supervisor, cl *clien
 // "socks5:<listen>" and "forward:<listen>" using the configured listen
 // strings, matching the static entries the panel already shows.
 func registerDataPlaneListeners(coreCtx context.Context, sup *supervisor, cl *client.Client, cfg *conf.Conf) error {
+	ft := make(map[string]string, len(cfg.Forward))
+	for _, ff := range cfg.Forward {
+		ft[ff.Listen_] = ff.Target
+	}
+	sup.setForwardTargets(ft)
 	for _, ss := range cfg.SOCKS5 {
 		ss := ss
 		s, err := socks.New(cl)
 		if err != nil {
 			return err
 		}
-		sup.RegisterListener("socks5:"+ss.Listen_, func(ctx context.Context) error {
+		id := "socks5:" + ss.Listen_
+		sup.trackSocksServer(id, s, ss.Egress)
+		sup.RegisterListener(id, func(ctx context.Context) error {
 			return serveUntilDone(ctx, coreCtx, func(c context.Context) error { return s.Start(c, ss) })
 		})
 	}

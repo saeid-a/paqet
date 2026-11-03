@@ -14,6 +14,7 @@ import (
 	"paqet/internal/conf"
 	"paqet/internal/flog"
 	"paqet/internal/metrics"
+	"paqet/internal/socks"
 )
 
 const (
@@ -53,6 +54,14 @@ type supervisor struct {
 	listenerCancel map[string]context.CancelFunc
 	listenerToken  map[string]uint64
 	listenerSeq    uint64
+	// socksServers tracks live SOCKS data-plane servers by listener ID
+	// ("socks5:<listen>") so the panel can steer their egress at runtime.
+	// socksEgress holds the configured spec per ID; forwardTargets maps
+	// forward listen -> target from the running core's config for
+	// "@active"/"forward:" resolution. All guarded by listenerMu.
+	socksServers   map[string]*socks.Server
+	socksEgress    map[string]string
+	forwardTargets map[string]string
 	// tunnelProbe dials targets through the tunnel for the panel's
 	// through-tunnel probe. Set by the client startFn once the client
 	// exists; nil when the core never started (e.g. server role).
@@ -91,10 +100,115 @@ func newSupervisor(configPath string, startFn func(ctx context.Context, cfg *con
 		listeners:      make(map[string]func(context.Context) error),
 		listenerCancel: make(map[string]context.CancelFunc),
 		listenerToken:  make(map[string]uint64),
+		socksServers:   make(map[string]*socks.Server),
+		socksEgress:    make(map[string]string),
+		forwardTargets: make(map[string]string),
 	}
 }
 
 func (s *supervisor) isRunning() bool { return s.running.Load() }
+
+// trackSocksServer records a SOCKS data-plane server and its boot egress
+// spec. The resolver closes over the spec so "@active"/"forward:" specs
+// follow forward switches at dial time with no per-dial disk reads.
+func (s *supervisor) trackSocksServer(id string, srv *socks.Server, spec string) {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	if srv != nil {
+		specCopy := spec
+		srv.SetEgressSpec(spec, func() string { return s.resolveSocksEgress(specCopy) })
+		s.socksServers[id] = srv
+	}
+	if _, ok := s.socksEgress[id]; !ok {
+		s.socksEgress[id] = spec
+	}
+}
+
+// setForwardTargets caches forward listen -> target from the running
+// core's config for SOCKS egress resolution.
+func (s *supervisor) setForwardTargets(m map[string]string) {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	s.forwardTargets = m
+}
+
+// resolveSocksEgress maps an egress spec to a concrete dial target.
+// "" means direct (no override). Unresolvable dynamic specs return ""
+// and the SOCKS server falls back to the requested destination.
+func (s *supervisor) resolveSocksEgress(spec string) string {
+	switch {
+	case spec == "":
+		return ""
+	case spec == "@active":
+		return s.activeForwardTarget()
+	case len(spec) > len("forward:") && spec[:len("forward:")] == "forward:":
+		s.listenerMu.Lock()
+		defer s.listenerMu.Unlock()
+		return s.forwardTargets[spec[len("forward:"):]]
+	default:
+		return spec
+	}
+}
+
+// activeForwardTarget returns the target of the sole running forward, or
+// "" when zero or several forwards run (ambiguous which is active).
+func (s *supervisor) activeForwardTarget() string {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	var found string
+	count := 0
+	for name := range s.listenerCancel {
+		if len(name) <= len("forward:") || name[:len("forward:")] != "forward:" {
+			continue
+		}
+		count++
+		found = s.forwardTargets[name[len("forward:"):]]
+	}
+	if count != 1 {
+		return ""
+	}
+	return found
+}
+
+// hasSocksListener reports whether id is a tracked SOCKS listener.
+func (s *supervisor) hasSocksListener(id string) bool {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	_, ok := s.socksEgress[id]
+	return ok
+}
+
+// SetSocksEgress steers a SOCKS listener's egress at runtime. The spec is
+// validated ("", "@active", "forward:<listen>", or host:port); dynamic
+// specs re-resolve on every dial so forward switches are followed.
+func (s *supervisor) SetSocksEgress(id, spec string) error {
+	if err := conf.ValidateSocksEgress(spec); err != nil {
+		return err
+	}
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	srv, ok := s.socksServers[id]
+	if !ok {
+		if _, known := s.socksEgress[id]; !known {
+			return fmt.Errorf("unknown socks listener %q", id)
+		}
+		s.socksEgress[id] = spec
+		return nil
+	}
+	specCopy := spec
+	srv.SetEgressSpec(spec, func() string { return s.resolveSocksEgress(specCopy) })
+	s.socksEgress[id] = spec
+	return nil
+}
+
+// SocksEgress returns the configured spec and its currently resolved
+// concrete target ("" = direct) for a SOCKS listener.
+func (s *supervisor) SocksEgress(id string) (spec, resolved string) {
+	s.listenerMu.Lock()
+	spec = s.socksEgress[id]
+	s.listenerMu.Unlock()
+	return spec, s.resolveSocksEgress(spec)
+}
 
 // SetAutoRestart toggles retry-with-backoff on core/listener failures.
 func (s *supervisor) SetAutoRestart(v bool) { s.autoRestart.Store(v) }
@@ -486,6 +600,16 @@ func (s *supervisor) boot(parentCtx context.Context, initial *conf.Conf) {
 		ListenerRunning: s.ListenerRunning,
 		Drain:           s.Drain,
 		TunnelProbe:     s.probeViaTunnel,
+		ListenerEgressSet: func(ctx context.Context, id, egress string) error {
+			return s.SetSocksEgress(id, egress)
+		},
+		ListenerEgressGet: func(id string) (string, string, bool) {
+			if !s.hasSocksListener(id) {
+				return "", "", false
+			}
+			spec, resolved := s.SocksEgress(id)
+			return spec, resolved, true
+		},
 	})
 
 	// initial start (same path as UI start, but without double-lock confusion).

@@ -212,3 +212,44 @@ func TestRestartReregistersListeners(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterTracksSocksEgressBootSpec(t *testing.T) {
+	cfg := &conf.Conf{
+		SOCKS5: []conf.SOCKS5{
+			{Listen_: "127.0.0.1:18085", Egress: "@active"},
+		},
+		Forward: []conf.Forward{
+			{Listen_: "127.0.0.1:18086", Target: "127.0.0.1:9", Protocol: "tcp"},
+		},
+	}
+	for i := range cfg.SOCKS5 {
+		cfg.SOCKS5[i].Listen = mustUDPAddr(t, cfg.SOCKS5[i].Listen_)
+	}
+	for i := range cfg.Forward {
+		cfg.Forward[i].Listen = mustUDPAddr(t, cfg.Forward[i].Listen_)
+	}
+	coreCtx, coreCancel := context.WithCancel(context.Background())
+	defer coreCancel()
+	sup := newSupervisor(t.TempDir()+"/client.yaml", func(ctx context.Context, c *conf.Conf) error { return nil })
+	cl, err := client.New(cfg)
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+	if err := registerDataPlaneListeners(coreCtx, sup, cl, cfg); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if !sup.hasSocksListener("socks5:127.0.0.1:18085") {
+		t.Fatal("socks server not tracked")
+	}
+	spec, _ := sup.SocksEgress("socks5:127.0.0.1:18085")
+	if spec != "@active" {
+		t.Fatalf("boot spec = %q", spec)
+	}
+	// Boot spec follows the forward once it is the sole runner.
+	if err := sup.StartListener("forward:127.0.0.1:18086"); err != nil {
+		t.Fatalf("start forward: %v", err)
+	}
+	if _, resolved := sup.SocksEgress("socks5:127.0.0.1:18085"); resolved != "127.0.0.1:9" {
+		t.Fatalf("resolved = %q, want 127.0.0.1:9", resolved)
+	}
+}

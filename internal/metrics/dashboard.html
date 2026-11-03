@@ -253,7 +253,7 @@ tbody tr.clickable:hover td{background:rgba(96,165,250,.07)}
 <div class="frm">
 <label class="only-client">server addr (client)<input type="text" id="fSrvAddr" placeholder="10.0.0.100:9999" title="paqet server address (client mode)"></label>
 <label class="only-server">listen addr (server)<input type="text" id="fLstnAddr" placeholder=":9999" title="server listen address (server mode)"></label>
-<label class="wide only-client">socks5 listeners (one per line: listen [username] [password])<textarea id="fSocks" rows="3" placeholder="127.0.0.1:1080"></textarea></label>
+<label class="wide only-client">socks5 listeners (one per line: listen [username] [password] [-> egress])<textarea id="fSocks" rows="3" placeholder="127.0.0.1:1080 -> @active"></textarea></label>
 <label class="wide only-client">forward rules (one per line: listen -&gt; target [protocol])<textarea id="fFwds" rows="3" placeholder="127.0.0.1:8080 -&gt; 127.0.0.1:80 tcp"></textarea></label>
 </div>
 <div class="fsec">Network (pcap)</div>
@@ -866,7 +866,7 @@ return ySet(cur,path,val,literal);
 function yGetSection(y,name){var lines=String(y||"").split("\n"),start=-1,end=lines.length;for(var i=0;i<lines.length;i++){var m=lines[i].match(/^([^\s#][^:]*):(.*)$/);if(m){if(start<0){if(m[1].trim()===name)start=i;}else{end=i;break;}}}if(start<0)return null;while(end-1>start&&lines[end-1].trim()===""||end-1>start&&lines[end-1].match(/^\s*#/))end--;return {start:start,end:end,block:lines.slice(start+1,end)};}
 function ySetSection(y,name,block){var lines=String(y||"").split("\n"),s=yGetSection(y,name),body=String(block||"").replace(/\s+$/,""),rep=body?[name+":",body].join("\n"):[name+": []"];if(!s){if(y&&y[y.length-1]!=="\n")y+="\n";return y+rep+"\n";}return lines.slice(0,s.start).concat(rep.split("\n"),lines.slice(s.end)).join("\n").replace(/\s+$/,"")+"\n";}
 function yParseList(s){s=String(s||"").trim();if(s[0]==="[")s=s.slice(1);if(s[s.length-1]==="]")s=s.slice(0,-1);return s.split(",").map(function(x){return x.trim().replace(/^["']|["']$/g,"");}).filter(function(x){return x;});}
-function parseSocksBlock(block){var out=[],cur=null;block.forEach(function(ln){var m=ln.match(/^\s*-\s+listen\s*:\s*(.*)$/);if(m){cur={listen:yStripVal(m[1]),user:"",pass:""};out.push(cur);return;}if(!cur)return;var m2=ln.match(/^\s*(username|password)\s*:\s*(.*)$/);if(m2){if(m2[1]==="username")cur.user=yStripVal(m2[2]);else cur.pass=yStripVal(m2[2]);}});return out;}
+function parseSocksBlock(block){var out=[],cur=null;block.forEach(function(ln){var m=ln.match(/^\s*-\s+listen\s*:\s*(.*)$/);if(m){cur={listen:yStripVal(m[1]),user:"",pass:"",egress:""};out.push(cur);return;}if(!cur)return;var m2=ln.match(/^\s*(username|password|egress)\s*:\s*(.*)$/);if(m2){if(m2[1]==="username")cur.user=yStripVal(m2[2]);else if(m2[1]==="password")cur.pass=yStripVal(m2[2]);else cur.egress=yStripVal(m2[2]);}});return out;}
 function parseFwdBlock(block){var out=[],cur=null;block.forEach(function(ln){var m=ln.match(/^\s*-\s+listen\s*:\s*(.*)$/);if(m){cur={listen:yStripVal(m[1]),target:"",proto:""};out.push(cur);return;}if(!cur)return;var m2=ln.match(/^\s*(target|protocol)\s*:\s*(.*)$/);if(m2){if(m2[1]==="target")cur.target=yStripVal(m2[2]);else cur.proto=yStripVal(m2[2]);}});return out;}
 var FORM_IDS=["fRole","fLevel","fAdminEn","fListen","fToken","fTlsCert","fTlsKey","fSrvAddr","fLstnAddr","fSocks","fFwds","fGuid","fV4Addr","fV4Mac","fV6Addr","fV6Mac","fSockbuf","fHandshake","fLocalFlag","fRemoteFlag","fProto","fConn","fKcp","fMtu","fWndS","fWndR","fNodelay","fInterval","fResend","fNoCong","fWdelay","fAckNodelay","fDshard","fPshard","fSmuxbuf","fStreambuf","fKalive","fKtimeout","fBlock","fKey"];
 function setV(id,v){var e=$(id);if(e)e.value=(v==null?"":String(v));}
@@ -886,7 +886,7 @@ setV("fTlsKey",yGet(y,["admin","tls_key"]));
 setV("fSrvAddr",yGet(y,["server","addr"]));
 setV("fLstnAddr",yGet(y,["listen","addr"]));
 var ss=yGetSection(y,"socks5");
-if(ss)setV("fSocks",parseSocksBlock(ss.block).map(function(e){return (e.listen+" "+e.user+" "+e.pass).trim();}).join("\n"));
+if(ss)setV("fSocks",parseSocksBlock(ss.block).map(function(e){var s=(e.listen+" "+e.user+" "+e.pass).trim();if(e.egress)s+=" -> "+e.egress;return s;}).join("\n"));
 var fs=yGetSection(y,"forward");
 if(fs)setV("fFwds",parseFwdBlock(fs.block).map(function(e){return e.listen+" -> "+e.target+(e.proto?" "+e.proto:"");}).join("\n"));
 window._wantIface=yGet(y,["network","interface"]);
@@ -924,7 +924,7 @@ updRoleVis();
 updKcpLock();
 }catch(e){}}
 function flagList(s){var parts=String(s||"").split(",").map(function(x){return x.trim().toUpperCase();}).filter(function(x){return x;});if(!parts.length)return "";return "["+parts.map(function(x){return '"'+x+'"';}).join(", ")+"]";}
-function parseSocksLines(t){var out=[],err="";String(t||"").split("\n").forEach(function(ln,n){var s=ln.trim();if(!s||s[0]==="#")return;var m=s.match(/^(\S+)(?:\s+(\S+))?(?:\s+([\s\S]+?))?\s*$/);if(!m||!m[1]){err="socks5 line "+(n+1)+": need 'listen [username] [password]'";return;}out.push({listen:m[1],user:m[2]||"",pass:m[3]||""});});return {list:out,err:err};}
+function parseSocksLines(t){var out=[],err="";String(t||"").split("\n").forEach(function(ln,n){var s=ln.trim();if(!s||s[0]==="#")return;var eg="";var m0=s.match(/^(.*?)\s+->\s*(\S+)\s*$/);if(m0){s=m0[1].trim();eg=m0[2];if(!validEgress(eg)){err="socks5 line "+(n+1)+": bad egress "+eg+" (want @active, forward:<listen>, or host:port)";return;}}var m=s.match(/^(\S+)(?:\s+(\S+))?(?:\s+([\s\S]+?))?\s*$/);if(!m||!m[1]){err="socks5 line "+(n+1)+": need 'listen [username] [password] [-> egress]'";return;}out.push({listen:m[1],user:m[2]||"",pass:m[3]||"",egress:eg});});return {list:out,err:err};}
 function parseFwdLines(t){var out=[],err="";String(t||"").split("\n").forEach(function(ln,n){var s=ln.trim();if(!s||s[0]==="#")return;var m=s.match(/^(.+?)\s*->\s*(\S+)(?:\s+(\S+))?\s*$/);if(!m){err="forward line "+(n+1)+": need 'listen -> target [protocol]'";return;}out.push({listen:m[1].trim(),target:m[2],proto:(m[3]||"tcp").toLowerCase()});});return {list:out,err:err};}
 function applyFormToYaml(){
 var y=$("cfg").value||"",v=function(id){var e=$(id);return e?e.value.trim():"";};
@@ -939,7 +939,7 @@ put(["admin","tls_key"],v("fTlsKey"));
 put(["server","addr"],v("fSrvAddr"));
 put(["listen","addr"],v("fLstnAddr"));
 var st=v("fSocks"),sSec=yGetSection(y,"socks5");
-if(st!==""||sSec){var ps=parseSocksLines(st);if(ps.err){formNote(ps.err,true);return null;}y=ySetSection(y,"socks5",ps.list.map(function(e){var s="  - listen: "+yQuote(e.listen);if(e.user)s+="\n    username: "+yQuote(e.user);if(e.pass)s+="\n    password: "+yQuote(e.pass);return s;}).join("\n"));}
+if(st!==""||sSec){var ps=parseSocksLines(st);if(ps.err){formNote(ps.err,true);return null;}y=ySetSection(y,"socks5",ps.list.map(function(e){var s="  - listen: "+yQuote(e.listen);if(e.user)s+="\n    username: "+yQuote(e.user);if(e.pass)s+="\n    password: "+yQuote(e.pass);if(e.egress)s+="\n    egress: "+yQuote(e.egress);return s;}).join("\n"));}
 var ft=v("fFwds"),fSec=yGetSection(y,"forward");
 if(ft!==""||fSec){var pf=parseFwdLines(ft);if(pf.err){formNote(pf.err,true);return null;}y=ySetSection(y,"forward",pf.list.map(function(e){return "  - listen: "+yQuote(e.listen)+"\n    target: "+yQuote(e.target)+"\n    protocol: "+yQuote(e.proto);}).join("\n"));}
 var ifv=v("fIface");put(["network","interface"],ifv!=="none"?ifv:"");
@@ -1133,6 +1133,32 @@ function lstDetail(it){if(typeof it==="string")return "";var parts=[];if(it.type
 function parseFwdTarget(t){t=String(t==null?"":t);var i=t.lastIndexOf(":");if(i<=0)return null;var h=t.slice(0,i).replace(/^\[/,"").replace(/\]$/,""),p=parseInt(t.slice(i+1),10);if(!h||isNaN(p)||p<1||p>65535)return null;return{host:h,port:p};}
 function listenerTest(id,target,btn,el){var t=parseFwdTarget(target);if(!t||!el)return;if(btn)btn.disabled=true;el.textContent="testing via tunnel…";
 api("api/diag/tunnel",{method:"POST",body:JSON.stringify({target:String(target),timeout_sec:10,label:"forward "+id}),cache:"no-store"}).then(function(r){if(r.status===409||r.status===429){return r.json().then(function(d){throw new Error((d&&d.error)||("busy (http "+r.status+")"));});}if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(d&&d.ok){el.textContent="ok "+(d.connect_ms==null?"?":d.connect_ms)+"ms"+(d.spoke?" (banner)":" · reachable (silent)");}else{el.textContent="fail: "+((d&&d.error)||"unknown");}try{loadProbeHistory();}catch(e){}}).catch(function(e){el.textContent="fail: "+String((e&&e.message)||e);}).finally(function(){if(btn)btn.disabled=false;});}
+function validEgress(e){e=String(e==null?"":e);if(!e||e==="@active")return true;if(e.indexOf("forward:")===0&&e.length>8)return true;return !!parseFwdTarget(e);}
+function socksForwards(){return (lastListeners||[]).filter(function(f){return f&&typeof f==="object"&&String(f.type||"")==="forward";});}
+function forwardTargetByListen(l){var fs=socksForwards();for(var i=0;i<fs.length;i++){if(String(fs[i].listen||"")===String(l))return String(fs[i].target||"");}return "";}
+function socksActiveTarget(){var t=null,n=0;(lastListeners||[]).forEach(function(f){if(f&&typeof f==="object"&&String(f.type||"")==="forward"&&f.running){n++;t=String(f.target||"");}});return n===1?t:"";}
+function socksEffectiveTarget(it,spec,customVal){
+if(spec==="custom")return String(customVal||"").trim();
+if(spec==="@active")return socksActiveTarget();
+if(spec&&spec.indexOf("forward:")===0)return forwardTargetByListen(spec.slice(8));
+return "";
+}
+function listenerSocksTest(id,el,se,ci,btn){
+var spec=se.value==="custom"?String(ci.value||"").trim():se.value;
+if(!spec){el.textContent="direct: tests the app destination, nothing fixed to probe";return;}
+if(!validEgress(spec)){el.textContent="invalid egress "+(spec||"(empty)");return;}
+var it=null;(lastListeners||[]).forEach(function(x){if(x&&(x.id||x.name)===id)it=x;});
+var target=socksEffectiveTarget(it,spec,ci.value);
+if(!target){el.textContent="no target: no active forward — pick one or enter host:port";return;}
+if(btn)btn.disabled=true;el.textContent="testing via tunnel\u2026";
+api("api/diag/tunnel",{method:"POST",body:JSON.stringify({target:target,timeout_sec:10,label:"socks "+id}),cache:"no-store"}).then(function(r){if(r.status===409||r.status===429){return r.json().then(function(d){throw new Error((d&&d.error)||("busy (http "+r.status+")"));});}if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){if(d&&d.ok){el.textContent="ok "+(d.connect_ms==null?"?":d.connect_ms)+"ms"+(d.spoke?" (banner)":" \u00b7 reachable (silent)");}else{el.textContent="fail: "+((d&&d.error)||"unknown");}try{loadProbeHistory();}catch(e){}}).catch(function(e){el.textContent="fail: "+String((e&&e.message)||e);}).finally(function(){if(btn)btn.disabled=false;});
+}
+function listenerSocksSet(id,el,se,ci,btn){
+var spec=se.value==="custom"?String(ci.value||"").trim():se.value;
+if(!validEgress(spec)){el.textContent="invalid egress "+(spec||"(empty)");return;}
+if(btn)btn.disabled=true;el.textContent="setting egress\u2026";
+api("api/listeners/"+encodeURIComponent(id)+"/egress",{method:"POST",body:JSON.stringify({egress:spec}),cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(){loadListeners();}).catch(function(e){el.textContent="set: "+String((e&&e.message)||e);}).finally(function(){if(btn)btn.disabled=false;});
+}
 function renderListeners(list){
 var tb=$("lstBody");if(!tb)return;while(tb.firstChild)tb.removeChild(tb.firstChild);
 $("lstEmpty").style.display=list.length?"none":"block";
@@ -1169,12 +1195,46 @@ var rs=document.createElement("div");rs.setAttribute("data-testid","fwd-test-res
 if(!pt){tb2.disabled=true;tb2.title="unparsable target "+(tgt||"(empty)");rs.textContent="—";}
 else{tb2.onclick=(function(id,t,btn,el){return function(){listenerTest(id,t,btn,el);};})(nm,tgt,tb2,rs);}
 tdT.appendChild(tb2);tdT.appendChild(rs);
-}else{tdT.textContent="—";tdT.className="mono";}
+}else if(it&&typeof it==="object"&&String(it.type||"")==="socks5"){
+var eg=String(it.egress||""),egt=String(it.egress_target||"");
+var cur=document.createElement("div");cur.className="mono";
+cur.setAttribute("data-testid","socks-egress-current");cur.setAttribute("data-id",nm);
+cur.textContent="egress: "+(egt||"direct")+(eg?" ("+eg+")":"");
+if(eg==="@active"&&!egt)cur.textContent+=" \u2014 no active forward";
+tdT.appendChild(cur);
+var sesel=document.createElement("select");
+sesel.setAttribute("data-testid","socks-egress");sesel.setAttribute("data-id",nm);
+sesel.title="egress for this SOCKS listener \u2014 runtime-only until Saved + Restarted";
+(function(){function mkOpt(v,t){var o=document.createElement("option");o.value=v;o.textContent=t;return o;}
+sesel.appendChild(mkOpt("","Direct (app destination)"));
+sesel.appendChild(mkOpt("@active","Follow active forward"));
+socksForwards().forEach(function(f){var fl=String(f.listen||"");sesel.appendChild(mkOpt("forward:"+fl,"Forward "+fl+" \u2192 "+String(f.target||"")));});
+sesel.appendChild(mkOpt("custom","Custom\u2026"));})();
+var civ=document.createElement("input");civ.setAttribute("type","text");civ.placeholder="host:port";civ.style.maxWidth="140px";
+civ.setAttribute("data-testid","socks-egress-custom");civ.setAttribute("data-id",nm);
+if(eg===""||eg==="@active"||(eg.indexOf("forward:")===0&&forwardTargetByListen(eg.slice(8)))){sesel.value=eg;}
+else{sesel.value="custom";civ.value=eg;}
+sesel.onchange=function(){civ.style.display=sesel.value==="custom"?"":"none";};
+civ.style.display=sesel.value==="custom"?"":"none";
+tdT.appendChild(sesel);tdT.appendChild(civ);
+var er=document.createElement("div");er.className="mono";
+er.setAttribute("data-testid","socks-egress-result");er.setAttribute("data-id",nm);
+var bte=document.createElement("button");bte.className="sub";bte.textContent="Test";bte.title="test resolved egress through the tunnel";
+bte.setAttribute("data-testid","socks-egress-test");bte.setAttribute("data-id",nm);
+bte.onclick=(function(id,el,se,ci,b){return function(){listenerSocksTest(id,el,se,ci,b);};})(nm,er,sesel,civ,bte);
+var bse=document.createElement("button");bse.className="sub";bse.textContent="Set";bse.title="set egress (runtime-only until Saved + Restarted)";
+bse.setAttribute("data-testid","socks-egress-set");bse.setAttribute("data-id",nm);
+bse.onclick=(function(id,el,se,ci,b){return function(){listenerSocksSet(id,el,se,ci,b);};})(nm,er,sesel,civ,bse);
+tdT.appendChild(bte);tdT.appendChild(bse);tdT.appendChild(er);
+}else{tdT.textContent="\u2014";tdT.className="mono";}
 tr.appendChild(tdT);
 tb.appendChild(tr);
 });
 }
-function loadListeners(){lstNote("");return api("api/listeners",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listeners endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var list=parseListeners(d);lastListeners=list;renderListeners(list);try{renderFwdActive();}catch(e){}if(!list.length)lstNote("no listeners reported");try{renderHealth();}catch(e){}return list;}).catch(function(e){renderListeners([]);try{renderFwdActive();}catch(x){}lstNote("listeners: "+e.message+" — continuing",true);return [];});}
+function loadListeners(){lstNote("");return api("api/listeners",{cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listeners endpoint unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.json();}).then(function(d){var list=parseListeners(d);lastListeners=list;renderListeners(list);try{renderFwdActive();}catch(e){}if(!list.length)lstNote("no listeners reported");
+else{var hasSocks=false;for(var hi=0;hi<list.length;hi++){if(list[hi]&&typeof list[hi]==="object"&&String(list[hi].type||"")==="socks5"){hasSocks=true;break;}}
+if(!hasSocks)lstNote("no SOCKS listener \u2014 add one via Config Form (socks5 listeners) or YAML, Save + Restart");}
+try{renderHealth();}catch(e){}return list;}).catch(function(e){renderListeners([]);try{renderFwdActive();}catch(x){}lstNote("listeners: "+e.message+" — continuing",true);return [];});}
 function listenerAction(id,action){lstNote(action+" "+id+"…");api("api/listeners/"+encodeURIComponent(id)+"/"+action,{method:"POST",cache:"no-store"}).then(function(r){if(r.status===404||r.status===501)throw new Error("listener control unavailable (http "+r.status+")");if(!r.ok)throw new Error("http "+r.status);return r.text();}).then(function(){lstNote(action+" ok: "+id);loadListeners();}).catch(function(e){lstNote(action+" "+id+": "+e.message+" — continuing",true);});}
 // forward selection: stop other running forwards, start the chosen one.
 // Runtime-only until the config is Saved + Restarted; the choice persists
@@ -1187,7 +1247,9 @@ if(!sel){el.textContent="";el.classList.add("hide");return;}
 var found=null,list=lastListeners||[];
 for(var i=0;i<list.length;i++){var nm=list[i]&&(list[i].id||list[i].name);if(nm===sel){found=list[i];break;}}
 el.classList.remove("hide");
-if(found)el.textContent="active forward: "+sel+" · runtime-only until Saved + Restarted";
+var followers=0;for(var fi=0;fi<list.length;fi++){if(list[fi]&&typeof list[fi]==="object"&&String(list[fi].type||"")==="socks5"&&String(list[fi].egress||"")==="@active")followers++;}
+var fsuf=followers?(" · "+followers+" SOCKS follower"+(followers>1?"s":"")+" track this"):"";
+if(found)el.textContent="active forward: "+sel+" · runtime-only until Saved + Restarted"+fsuf;
 else el.textContent="saved selection not found: "+sel+" — pick a forward below";
 }
 function listenerUse(id){

@@ -12,25 +12,29 @@ import (
 
 func (s *Server) handleConnect(ctx context.Context, conn net.Conn, req *request) {
 	addr := req.address()
-	strm, err := s.client.TCP(ctx, addr)
+	target := s.effectiveTarget(addr)
+	if target != addr {
+		flog.Debugf("SOCKS5 CONNECT from %s to %s via egress %s", conn.RemoteAddr(), addr, target)
+	}
+	strm, err := s.client.TCP(ctx, target)
 	if err != nil {
-		flog.Errorf("SOCKS5 failed to establish TCP stream for %s -> %s: %v", conn.RemoteAddr(), addr, err)
+		flog.Errorf("SOCKS5 failed to establish TCP stream for %s -> %s: %v", conn.RemoteAddr(), target, err)
 		metrics.IncFailure()
 		metrics.IncFailureTCP()
 		metrics.IncFailureSOCKS()
-		metrics.IncTarget(addr, 0, 0, false)
+		metrics.IncTarget(target, 0, 0, false)
 		s.write(conn, repFailure)
 		return
 	}
 	defer strm.Close()
-	flog.Infof("SOCKS5 accepted TCP connection %s -> %s", conn.RemoteAddr(), addr)
+	flog.Infof("SOCKS5 accepted TCP connection %s -> %s", conn.RemoteAddr(), target)
 
 	lAddr := conn.LocalAddr().(*net.TCPAddr)
 	if _, err := conn.Write(append([]byte{ver, repSuccess, 0x00}, putAddr(nil, lAddr.IP, lAddr.Port)...)); err != nil {
 		metrics.IncFailure()
 		metrics.IncFailureTCP()
 		metrics.IncFailureSOCKS()
-		metrics.IncTarget(addr, 0, 0, false)
+		metrics.IncTarget(target, 0, 0, false)
 		return
 	}
 
@@ -46,24 +50,24 @@ func (s *Server) handleConnect(ctx context.Context, conn net.Conn, req *request)
 		// which unblocks the peer CopyT (errCh is buffered so no leak).
 		inBytes, outBytes := uint64(inN.Load()), uint64(outN.Load())
 		if err != nil {
-			flog.Errorf("SOCKS5 TCP stream %d failed for %s -> %s: %v", strm.SID(), conn.RemoteAddr(), addr, err)
+			flog.Errorf("SOCKS5 TCP stream %d failed for %s -> %s: %v", strm.SID(), conn.RemoteAddr(), target, err)
 			metrics.IncFailure()
 			metrics.IncFailureTCP()
 			metrics.IncFailureSOCKS()
-			metrics.IncTarget(addr, inBytes, outBytes, false)
+			metrics.IncTarget(target, inBytes, outBytes, false)
 		} else {
 			metrics.IncSuccess()
 			metrics.IncSuccessTCP()
 			metrics.IncSuccessSOCKS()
-			metrics.IncTarget(addr, inBytes, outBytes, true)
+			metrics.IncTarget(target, inBytes, outBytes, true)
 		}
 	case <-ctx.Done():
 		// Don't drop byte totals on shutdown/drain.
 		metrics.IncSuccess()
 		metrics.IncSuccessTCP()
 		metrics.IncSuccessSOCKS()
-		metrics.IncTarget(addr, uint64(inN.Load()), uint64(outN.Load()), true)
+		metrics.IncTarget(target, uint64(inN.Load()), uint64(outN.Load()), true)
 	}
 
-	flog.Debugf("SOCKS5 connection %s -> %s closed", conn.RemoteAddr(), addr)
+	flog.Debugf("SOCKS5 connection %s -> %s closed", conn.RemoteAddr(), target)
 }

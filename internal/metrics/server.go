@@ -37,7 +37,12 @@ type Controller struct {
 	ListenerStart   func(id string) error
 	ListenerStop    func(id string) error
 	ListenerRunning func(id string) bool
-	Drain           func(timeoutSec int) error
+	// ListenerEgressSet/Get steer a SOCKS listener's egress at runtime.
+	// Get returns (spec, resolvedTarget, ok). If nil, egress endpoints
+	// return 501 and listener entries carry no egress fields.
+	ListenerEgressSet func(ctx context.Context, id, egress string) error
+	ListenerEgressGet func(id string) (spec, resolved string, ok bool)
+	Drain             func(timeoutSec int) error
 	// TunnelProbe dials target through the tunnel (client role). If nil,
 	// the tunnel probe endpoint returns 501.
 	TunnelProbe func(ctx context.Context, target string, timeoutSec int) (ms int64, spoke bool, err error)
@@ -1012,6 +1017,14 @@ func listenersHandler(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			// Merge live SOCKS egress (spec + currently resolved target)
+			// so the panel can show and steer it without a second call.
+			if c.ListenerEgressGet != nil {
+				if spec, resolved, ok := c.ListenerEgressGet(n); ok {
+					entry["egress"] = spec
+					entry["egress_target"] = resolved
+				}
+			}
 			listeners = append(listeners, entry)
 		}
 		if listeners == nil {
@@ -1052,8 +1065,12 @@ func listenersActionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, action := rest[:slash], strings.ToLower(strings.TrimSpace(rest[slash+1:]))
-	if id == "" || (action != "start" && action != "stop") {
-		http.Error(w, "want POST /api/listeners/{id}/{start|stop}", http.StatusBadRequest)
+	if id == "" || (action != "start" && action != "stop" && action != "egress") {
+		http.Error(w, "want POST /api/listeners/{id}/{start|stop|egress}", http.StatusBadRequest)
+		return
+	}
+	if action == "egress" {
+		listenerEgressHandler(w, r)
 		return
 	}
 	c := getController()
