@@ -244,6 +244,7 @@ func TestDashboardSocksEgress(t *testing.T) {
 		"socks-egress-custom", "socks-egress-current",
 		"api/listeners/", "/egress", "egress_target", "Follow active forward",
 		"no SOCKS listener", "SOCKS follower",
+		"probeResultCache", "showProbeResult", "noteProbe",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q", want)
