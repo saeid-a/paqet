@@ -19,7 +19,7 @@ paqet operates on raw packets instead. It crafts TCP packets directly and uses p
 ### Prerequisites
 
 - `libpcap` development libraries must be installed on both the client and server machines.
-  - **Linux:** No libpcap prerequisites - libpcap is statically linked, but the binary still requires the host glibc runtime matching the build toolchain.
+  - **Linux:** No prerequisites - libpcap is statically linked and the binary is fully static (musl), with no glibc runtime dependency.
   - **macOS:** Comes pre-installed with Xcode Command Line Tools. Install with `xcode-select --install`
   - **Windows:** Install Npcap. Download from [npcap.com](https://npcap.com/).
 

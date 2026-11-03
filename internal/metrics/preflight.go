@@ -164,11 +164,26 @@ func preflightHandler(w http.ResponseWriter, r *http.Request) {
 		checks = append(checks, mkCheck("transport-key", "Transport key", "fail", "kcp key is missing", "set transport.kcp.key"))
 	}
 
-	// firewall
+	// firewall: server-only iptables check; client hosts need the
+	// scoped RST-suppression rules surfaced via client_fix instead.
 	var fw diag.FirewallResult
 	fw.Port = port
-	if runtime.GOOS != "linux" {
-		checks = append(checks, mkCheck("firewall", "Firewall", "unknown", "firewall check unsupported on "+runtime.GOOS, "apply the server_fix/client_fix rules manually on Linux"))
+	var clientFix []string
+	if role == "client" {
+		clientFix = diag.ClientFirewallFix(serverHost, port)
+	}
+	if clientFix == nil {
+		clientFix = []string{}
+	}
+	if role != "server" {
+		fw.Supported = runtime.GOOS == "linux"
+		fix := strings.Join(clientFix, "\n")
+		if fix == "" {
+			fix = "see client_fix"
+		}
+		checks = append(checks, mkCheck("firewall", "Firewall", "unknown", "firewall check applies to server role; see client_fix for this host", fix))
+	} else if runtime.GOOS != "linux" {
+		checks = append(checks, mkCheck("firewall", "Firewall", "unknown", "firewall check unsupported on "+runtime.GOOS, "apply the server_fix rules manually on Linux"))
 	} else if v, ok := runDiagWithTimeout(r.Context(), 5*time.Second, func() any {
 		return diag.FirewallCheck(port)
 	}); !ok {
@@ -191,14 +206,6 @@ func preflightHandler(w http.ResponseWriter, r *http.Request) {
 		fw.Missing = []string{}
 	}
 	serverFix := append([]string{}, fw.Fix...)
-
-	var clientFix []string
-	if role == "client" {
-		clientFix = diag.ClientFirewallFix(serverHost, port)
-	}
-	if clientFix == nil {
-		clientFix = []string{}
-	}
 
 	_ = json.NewEncoder(w).Encode(preflightResponse{
 		Role:      role,

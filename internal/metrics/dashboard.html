@@ -401,7 +401,7 @@ else if(!e.dataset.sticky){e.style.display="none";e.textContent="";}
 // auth wrapper: Bearer from sessionStorage on every /api call
 try{var _t=sessionStorage.getItem("paqet-token")||"";if(_t)$("tok").value=_t;}catch(e){}
 $("tok").addEventListener("input",function(){try{sessionStorage.setItem("paqet-token",this.value);}catch(e){}});
-function authH(h){h=h||{};try{var t=sessionStorage.getItem("paqet-token")||"";if(t)h["Authorization"]="Bearer "+t;}catch(e){}return h;}
+function authH(h){h=h||{};if(!h["Content-Type"]&&!h["content-type"])h["Content-Type"]="application/json";try{var t=sessionStorage.getItem("paqet-token")||"";if(t)h["Authorization"]="Bearer "+t;}catch(e){}return h;}
 function api(p,o){o=o||{};o.headers=authH(o.headers||{});return fetch(p,o);}
 // tabs
 var TABS=["overview","conns","targets","config","logs","diag","setup"];

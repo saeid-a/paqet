@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -49,13 +50,14 @@ type Controller struct {
 }
 
 var (
-	ctrl       atomic.Value // Controller
-	running    atomic.Bool
-	configPath atomic.Value // string
-	buildInfo  atomic.Value // BuildInfo
-	adminToken atomic.Value // string
-	tlsCert    atomic.Value // string
-	tlsKey     atomic.Value // string
+	ctrl        atomic.Value // Controller
+	running     atomic.Bool
+	configPath  atomic.Value // string
+	buildInfo   atomic.Value // BuildInfo
+	adminToken  atomic.Value // string
+	adminListen atomic.Value // string
+	tlsCert     atomic.Value // string
+	tlsKey      atomic.Value // string
 )
 
 type BuildInfo struct {
@@ -71,6 +73,7 @@ func SetRunning(v bool)          { running.Store(v) }
 func SetConfigPath(p string)     { configPath.Store(p) }
 func SetBuildInfo(b BuildInfo)   { buildInfo.Store(b) }
 func SetAdminToken(t string)     { adminToken.Store(t) }
+func SetAdminListen(l string)    { adminListen.Store(l) }
 func SetTLS(cert, key string) {
 	tlsCert.Store(cert)
 	tlsKey.Store(key)
@@ -104,6 +107,34 @@ func getAdminToken() string {
 	return ""
 }
 
+func getAdminListen() string {
+	if v, ok := adminListen.Load().(string); ok {
+		return v
+	}
+	return ""
+}
+
+// adminListenIsLoopback mirrors conf.Admin.validate's listen-address rules:
+// only an explicitly loopback IP counts as loopback. Empty/hostname-less
+// (":9090", IP nil), wildcard ("0.0.0.0", "::"), or any non-loopback IP
+// requires a token. Unresolvable addresses fail closed.
+func adminListenIsLoopback() bool {
+	listen := getAdminListen()
+	if listen == "" {
+		// No listen recorded (e.g. tests setting only a token):
+		// preserve legacy behavior and let the remote check decide.
+		return true
+	}
+	addr, err := net.ResolveTCPAddr("tcp", listen)
+	if err != nil {
+		return false
+	}
+	if addr.IP == nil {
+		return false
+	}
+	return addr.IP.IsLoopback()
+}
+
 func getTLSCert() string {
 	if v, ok := tlsCert.Load().(string); ok {
 		return v
@@ -119,11 +150,15 @@ func getTLSKey() string {
 }
 
 // isAuthorized reports whether the request carries a valid bearer token.
-// When no token is configured, only loopback requests are authorized;
-// remote requests without a token are denied.
+// When no token is configured, only loopback remotes against a loopback
+// listen address are authorized; anything bound to a non-loopback listen
+// address is denied (mirrors conf.Admin's token-required rule).
 func isAuthorized(r *http.Request) bool {
 	tok := getAdminToken()
 	if tok == "" {
+		if !adminListenIsLoopback() {
+			return false
+		}
 		host := remoteIP(r)
 		if ip := net.ParseIP(host); ip != nil {
 			return ip.IsLoopback()
@@ -153,6 +188,12 @@ func isAuthorized(r *http.Request) bool {
 
 func requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if code, msg := checkRequestGuards(r); code != 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+			return
+		}
 		if !isAuthorized(r) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
@@ -161,6 +202,173 @@ func requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// checkRequestGuards rejects DNS-rebinding/CSRF vectors before auth:
+// invalid Host headers, Origin values that do not match Host, and
+// state-changing requests without an application/json content type
+// (simple form posts cannot set it without a CORS preflight).
+// In no-token (loopback-only) mode the Host itself must be loopback,
+// otherwise a rebinding domain resolving to 127.0.0.1 would pass an
+// Origin==Host check while still reaching the admin socket.
+// Returns (0, "") when the request passes.
+func checkRequestGuards(r *http.Request) (int, string) {
+	if !validHostHeader(r.Host) {
+		return http.StatusBadRequest, "invalid host header"
+	}
+	if getAdminToken() == "" && !hostHeaderIsLoopback(r.Host) {
+		return http.StatusForbidden, "host not allowed"
+	}
+	if !originMatchesHost(r) {
+		return http.StatusForbidden, "origin mismatch"
+	}
+	if isStateChanging(r.Method) && !hasJSONContentType(r) {
+		return http.StatusUnsupportedMediaType, "content-type must be application/json"
+	}
+	return 0, ""
+}
+
+// hostHeaderIsLoopback reports whether the Host header names a loopback
+// destination (127.0.0.0/8, ::1, or localhost), ignoring any port.
+func hostHeaderIsLoopback(h string) bool {
+	hostname := strings.ToLower(strings.TrimSpace(h))
+	if strings.Contains(hostname, ":") {
+		if host, _, err := net.SplitHostPort(hostname); err == nil {
+			hostname = host
+		} else if strings.HasPrefix(hostname, "[") && strings.HasSuffix(hostname, "]") {
+			hostname = hostname[1 : len(hostname)-1]
+		} else {
+			return false
+		}
+	}
+	hostname = strings.Trim(hostname, "[]")
+	if hostname == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(hostname); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+func validHostHeader(h string) bool {
+	if h == "" {
+		return false
+	}
+	if strings.ContainsAny(h, " \t\r\n/@\\?#") {
+		return false
+	}
+	for _, c := range h {
+		if c < 0x20 || c == 0x7f {
+			return false
+		}
+	}
+	if !strings.Contains(h, ":") {
+		return len(h) <= 253
+	}
+	// Bracketed IPv6 without port, e.g. "[::1]".
+	if strings.HasPrefix(h, "[") {
+		if end := strings.LastIndex(h, "]"); end != -1 {
+			if end == len(h)-1 {
+				return net.ParseIP(h[1:end]) != nil
+			}
+			// Must be "[v6]:port".
+			host, port, err := net.SplitHostPort(h)
+			if err != nil || host == "" || port == "" {
+				return false
+			}
+			for _, c := range port {
+				if c < '0' || c > '9' {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	}
+	// More than one colon without brackets is a bare IPv6 address,
+	// which is never a valid Host header (must be bracketed).
+	if strings.Count(h, ":") > 1 {
+		return false
+	}
+	host, port, err := net.SplitHostPort(h)
+	if err != nil || host == "" || port == "" {
+		return false
+	}
+	for _, c := range port {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func originMatchesHost(r *http.Request) bool {
+	o := r.Header.Get("Origin")
+	if o == "" {
+		return true
+	}
+	u, err := url.Parse(o)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+	oHostname := strings.Trim(strings.ToLower(u.Hostname()), "[]")
+	rHostname := strings.ToLower(r.Host)
+	var rPort string
+	if h, p, err := net.SplitHostPort(strings.ToLower(r.Host)); err == nil {
+		rHostname, rPort = h, p
+	} else {
+		if strings.Contains(rHostname, ":") {
+			return false
+		}
+		rPort = ""
+	}
+	rHostname = strings.Trim(rHostname, "[]")
+	if oHostname != rHostname {
+		return false
+	}
+	oPort := u.Port()
+	effOPort := oPort
+	if effOPort == "" {
+		if u.Scheme == "http" {
+			effOPort = "80"
+		} else {
+			effOPort = "443"
+		}
+	}
+	effRPort := rPort
+	if effRPort == "" {
+		if r.TLS != nil {
+			effRPort = "443"
+		} else {
+			effRPort = "80"
+		}
+	}
+	return effOPort == effRPort
+}
+
+func isStateChanging(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasJSONContentType(r *http.Request) bool {
+	ct := r.Header.Get("Content-Type")
+	if ct == "" {
+		return false
+	}
+	media, _, _ := strings.Cut(ct, ";")
+	return strings.EqualFold(strings.TrimSpace(media), "application/json")
 }
 
 func remoteIP(r *http.Request) string {
@@ -202,6 +410,7 @@ func StartWithController(ctx context.Context, cfg conf.Admin, c Controller) {
 		tok = cfg.Token
 	}
 	SetAdminToken(tok)
+	SetAdminListen(cfg.Listen_)
 	cert := c.TLSCert
 	if cert == "" {
 		cert = cfg.TLSCert
@@ -293,6 +502,12 @@ func StartWithController(ctx context.Context, cfg conf.Admin, c Controller) {
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
+		return
+	}
+	if code, msg := checkRequestGuards(r); code != 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 		return
 	}
 	// Serve the UI without auth: a browser navigating to / cannot send an

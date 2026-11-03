@@ -43,14 +43,22 @@ func bindIsLoopback(bind string) bool {
 
 // exposureFor derives safe/warn/critical from bind + client loopback state,
 // token length, and TLS. Short tokens (1-15 chars) are always critical;
-// a valid token (16+) is always safe. Without a token, anything reachable
-// beyond loopback is critical; loopback-only without TLS is warn.
+// a valid token (16+) is safe on TLS connections or loopback-only paths,
+// and warn when exposed beyond loopback without TLS. Without a token,
+// anything reachable beyond loopback is critical; loopback-only without
+// TLS is warn.
 func exposureFor(bindLoopback, clientLoopback bool, token string, tls bool) string {
 	if len(token) > 0 && len(token) < 16 {
 		return "critical"
 	}
 	if len(token) >= 16 {
-		return "safe"
+		if tls {
+			return "safe"
+		}
+		if bindLoopback && clientLoopback {
+			return "safe"
+		}
+		return "warn"
 	}
 	if tls && bindLoopback && clientLoopback {
 		return "safe"

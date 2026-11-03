@@ -29,6 +29,8 @@ LDFLAGS       := -s -w -buildid= \
 	-X '$(MODULE)/cmd/version.GitCommit=$(GIT_COMMIT)' \
 	-X '$(MODULE)/cmd/version.BuildTime=$(BUILD_TIME)'
 GCFLAGS       := all=-l=4
+# Fully static Linux link flags (musl + static libpcap, no glibc runtime).
+LINUX_LDFLAGS := $(LDFLAGS) -linkmode external -extldflags '-static'
 
 GOBIN         ?= $(shell go env GOBIN)
 ifeq ($(GOBIN),)
@@ -70,13 +72,15 @@ endif
 	@echo "installed $(GOBIN)/paqet [$(VERSION)]"
 	@$(GOBIN)/paqet version | head -2
 
-# --- Linux cross builds (zig CGO + static libpcap) --------------------------
+# --- Linux cross builds (zig CGO + static libpcap + static musl) -----------------
+# Targets use zig's musl libc plus `-static` so the resulting binaries have
+# no dynamic glibc runtime dependency (fully static, libpcap included).
 build-all: $(BUILD_DIR)/paqet-darwin-arm64 $(BUILD_DIR)/paqet-linux-arm64 $(BUILD_DIR)/paqet-linux-amd64
 	@echo "all artifacts [$(VERSION)]:"; ls -la $(BUILD_DIR)/paqet-*
 
 $(BUILD_DIR)/paqet-darwin-arm64:
 	@mkdir -p $(BUILD_DIR)
-	@if [ "$$(go env GOOS)" != "darwin" ]; then echo "error: paqet-darwin-arm64 CGO build requires a darwin host (got $$(go env GOOS)); refusing to use an incompatible host compiler" >&2; exit 1; fi
+	@if [ "$$(go env GOHOSTOS)" != "darwin" ]; then echo "error: paqet-darwin-arm64 CGO build requires a darwin host (got $$(go env GOHOSTOS)); refusing to use an incompatible host compiler" >&2; exit 1; fi
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 \
 	go build -trimpath -gcflags "$(GCFLAGS)" -ldflags "$(LDFLAGS)" \
 		-o $@ $(CMD)
@@ -85,7 +89,7 @@ $(PCAP_TARBALL):
 	@mkdir -p $(PCAP_ROOT)
 	curl -sSL -o $@ $(LIBPCAP_URL)
 
-# $1 = GNU host triplet, $2 = zig target
+# $1 = configure host triplet / build dir suffix, $2 = zig target
 define pcap_static
 	@if [ ! -f $(PCAP_SRC)-$1/libpcap.a ]; then \
 		rm -rf $(PCAP_SRC)-$1 && mkdir -p $(PCAP_SRC)-$1 && \
@@ -102,27 +106,27 @@ endef
 
 $(BUILD_DIR)/paqet-linux-arm64: $(PCAP_TARBALL)
 	@mkdir -p $(BUILD_DIR)
-	$(call pcap_static,aarch64-linux-gnu,aarch64-linux-gnu)
+	$(call pcap_static,aarch64-linux-musl,aarch64-linux-musl)
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 \
-	CC="zig cc -target aarch64-linux-gnu" \
-	CGO_CFLAGS="-I$(PCAP_SRC)-aarch64-linux-gnu" \
-	CGO_LDFLAGS="-L$(PCAP_SRC)-aarch64-linux-gnu" \
-	go build -trimpath -gcflags "$(GCFLAGS)" -ldflags "$(LDFLAGS)" \
+	CC="zig cc -target aarch64-linux-musl" \
+	CGO_CFLAGS="-I$(CURDIR)/$(PCAP_SRC)-aarch64-linux-musl" \
+	CGO_LDFLAGS="-L$(CURDIR)/$(PCAP_SRC)-aarch64-linux-musl" \
+	go build -trimpath -gcflags "$(GCFLAGS)" -ldflags "$(LINUX_LDFLAGS)" \
 		-o $@ $(CMD)
 
 $(BUILD_DIR)/paqet-linux-amd64: $(PCAP_TARBALL)
 	@mkdir -p $(BUILD_DIR)
-	$(call pcap_static,x86_64-linux-gnu,x86_64-linux-gnu)
+	$(call pcap_static,x86_64-linux-musl,x86_64-linux-musl)
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 \
-	CC="zig cc -target x86_64-linux-gnu" \
-	CGO_CFLAGS="-I$(PCAP_SRC)-x86_64-linux-gnu" \
-	CGO_LDFLAGS="-L$(PCAP_SRC)-x86_64-linux-gnu" \
-	go build -trimpath -gcflags "$(GCFLAGS)" -ldflags "$(LDFLAGS)" \
+	CC="zig cc -target x86_64-linux-musl" \
+	CGO_CFLAGS="-I$(CURDIR)/$(PCAP_SRC)-x86_64-linux-musl" \
+	CGO_LDFLAGS="-L$(CURDIR)/$(PCAP_SRC)-x86_64-linux-musl" \
+	go build -trimpath -gcflags "$(GCFLAGS)" -ldflags "$(LINUX_LDFLAGS)" \
 		-o $@ $(CMD)
 
 pcap-deps: $(PCAP_TARBALL)
-	$(call pcap_static,aarch64-linux-gnu,aarch64-linux-gnu)
-	$(call pcap_static,x86_64-linux-gnu,x86_64-linux-gnu)
+	$(call pcap_static,aarch64-linux-musl,aarch64-linux-musl)
+	$(call pcap_static,x86_64-linux-musl,x86_64-linux-musl)
 
 test:
 	go test ./...

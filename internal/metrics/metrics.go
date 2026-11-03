@@ -291,7 +291,6 @@ var trOldestStreamAgeSec int64
 var trHeapAlloc uint64
 var trSys uint64
 var trGCCycles uint64
-var trTargetFill int64
 var trRetransSegs uint64
 var trLostSegs uint64
 var trFECRecovered uint64
@@ -337,7 +336,6 @@ func SetTransportSnapshot(s TransportStats) {
 	atomic.StoreUint64(&trHeapAlloc, s.HeapAllocBytes)
 	atomic.StoreUint64(&trSys, s.SysBytes)
 	atomic.StoreUint64(&trGCCycles, s.GCCycles)
-	atomic.StoreInt64(&trTargetFill, int64(s.TargetFill))
 	atomic.StoreUint64(&trRetransSegs, s.RetransSegs)
 	atomic.StoreUint64(&trLostSegs, s.LostSegs)
 	atomic.StoreUint64(&trFECRecovered, s.FECRecovered)
@@ -622,6 +620,9 @@ func SnapshotNow() Snapshot {
 	sort.Slice(connSnaps, func(i, j int) bool {
 		return connSnaps[i].ID < connSnaps[j].ID
 	})
+	targetMu.RLock()
+	targetFill := len(targets)
+	targetMu.RUnlock()
 	return Snapshot{
 		Role:              roleValue,
 		Timestamp:         time.Now().UTC().Format(time.RFC3339Nano),
@@ -681,7 +682,7 @@ func SnapshotNow() Snapshot {
 			HeapAllocBytes: atomic.LoadUint64(&trHeapAlloc),
 			SysBytes:       atomic.LoadUint64(&trSys),
 			GCCycles:       atomic.LoadUint64(&trGCCycles),
-			TargetFill:     int(atomic.LoadInt64(&trTargetFill)),
+			TargetFill:     targetFill,
 			TargetCap:      maxTargetEntries,
 			RetransSegs:    atomic.LoadUint64(&trRetransSegs),
 			LostSegs:       atomic.LoadUint64(&trLostSegs),

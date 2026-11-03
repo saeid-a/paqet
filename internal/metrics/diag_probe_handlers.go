@@ -128,7 +128,7 @@ func diagDialHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	timeoutSec := clampProbeSec(req.TimeoutSec, probeDefaultSec, probeMaxSec)
-	v, ok := runDiagWithTimeout(r.Context(), time.Duration(timeoutSec)*time.Second, func() any {
+	v, ok := runDiagWithTimeout(r.Context(), time.Duration(timeoutSec+2)*time.Second, func() any {
 		res, err := diag.DialProbe(r.Context(), host, req.Port, timeoutSec)
 		if err != nil {
 			return map[string]any{"error": err.Error()}
@@ -276,7 +276,7 @@ func diagUDPHandler(w http.ResponseWriter, r *http.Request) {
 		nbytes = req.NBytes
 	}
 	timeoutSec := clampProbeSec(req.TimeoutSec, probeDefaultSec, probeMaxSec)
-	v, ok := runDiagWithTimeout(r.Context(), time.Duration(timeoutSec)*time.Second, func() any {
+	v, ok := runDiagWithTimeout(r.Context(), time.Duration(timeoutSec+2)*time.Second, func() any {
 		res, err := diag.UDPProbe(r.Context(), host, req.Port, timeoutSec, nbytes)
 		if err != nil {
 			return map[string]any{"error": err.Error()}

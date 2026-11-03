@@ -81,6 +81,7 @@ func DialProbe(ctx context.Context, host string, port, timeoutSec int) (DialResu
 const (
 	udpDefaultBytes = 32
 	udpMaxBytes     = 1200
+	udpMTUMaxBytes  = 1472
 )
 
 // UDPResult is the outcome of one UDP echo probe.
@@ -156,7 +157,7 @@ func MTUProbe(ctx context.Context, host string, port int) (MTUResult, error) {
 		if sweepCtx.Err() != nil {
 			break
 		}
-		r, err := UDPProbe(sweepCtx, host, port, 1, size)
+		r, err := udpProbe(sweepCtx, host, port, 1, size, udpMTUMaxBytes)
 		if err != nil || !r.OK {
 			continue
 		}
@@ -174,6 +175,10 @@ func MTUProbe(ctx context.Context, host string, port int) (MTUResult, error) {
 // A timeout reports no-echo rather than failure: arbitrary hosts only
 // reply when something echoes UDP there.
 func UDPProbe(ctx context.Context, host string, port, timeoutSec, nbytes int) (UDPResult, error) {
+	return udpProbe(ctx, host, port, timeoutSec, nbytes, udpMaxBytes)
+}
+
+func udpProbe(ctx context.Context, host string, port, timeoutSec, nbytes, maxBytes int) (UDPResult, error) {
 	host = strings.TrimSpace(host)
 	if err := validateProbeTarget(host, port); err != nil {
 		return UDPResult{}, err
@@ -182,8 +187,8 @@ func UDPProbe(ctx context.Context, host string, port, timeoutSec, nbytes int) (U
 	if nbytes <= 0 {
 		nbytes = udpDefaultBytes
 	}
-	if nbytes > udpMaxBytes {
-		nbytes = udpMaxBytes
+	if nbytes > maxBytes {
+		nbytes = maxBytes
 	}
 	raddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, fmt.Sprint(port)))
 	if err != nil {
@@ -207,7 +212,7 @@ func UDPProbe(ctx context.Context, host string, port, timeoutSec, nbytes int) (U
 		}
 		return UDPResult{Host: host, Port: port, Error: err.Error()}, nil
 	}
-	buf := make([]byte, udpMaxBytes)
+	buf := make([]byte, maxBytes)
 	for {
 		n, from, err := conn.ReadFromUDP(buf)
 		if err != nil {
