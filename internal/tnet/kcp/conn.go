@@ -3,11 +3,13 @@ package kcp
 import (
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/xtaci/kcp-go/v5"
 	"github.com/xtaci/smux"
 
+	"paqet/internal/metrics"
 	"paqet/internal/protocol"
 	"paqet/internal/socket"
 	"paqet/internal/tnet"
@@ -17,22 +19,29 @@ type Conn struct {
 	PacketConn *socket.PacketConn
 	UDPSession *kcp.UDPSession
 	Session    *smux.Session
+	once       sync.Once
+	counted    bool
+	metricsID  uint64
 }
 
 func (c *Conn) OpenStrm() (tnet.Strm, error) {
 	strm, err := c.Session.OpenStream()
 	if err != nil {
+		metrics.IncFailure()
+		metrics.IncSmuxOpenFail()
 		return nil, err
 	}
-	return &Strm{strm}, nil
+	return newStrm(strm, c.metricsID), nil
 }
 
 func (c *Conn) AcceptStrm() (tnet.Strm, error) {
 	strm, err := c.Session.AcceptStream()
 	if err != nil {
+		metrics.IncFailure()
+		metrics.IncSmuxAcceptFail()
 		return nil, err
 	}
-	return &Strm{strm}, nil
+	return newStrm(strm, c.metricsID), nil
 }
 
 func (c *Conn) Ping(wait bool) error {
@@ -60,6 +69,15 @@ func (c *Conn) Ping(wait bool) error {
 
 func (c *Conn) Close() error {
 	var err error
+	c.once.Do(func() {
+		if c.counted {
+			metrics.DecConnections()
+		}
+		if c.metricsID != 0 {
+			metrics.UnregisterConnection(c.metricsID)
+		}
+		untrackSession(c.Session)
+	})
 	if c.Session != nil {
 		if e := c.Session.Close(); e != nil {
 			err = e
@@ -83,3 +101,10 @@ func (c *Conn) RemoteAddr() net.Addr               { return c.Session.RemoteAddr
 func (c *Conn) SetDeadline(t time.Time) error      { return c.UDPSession.SetDeadline(t) }
 func (c *Conn) SetReadDeadline(t time.Time) error  { return c.UDPSession.SetReadDeadline(t) }
 func (c *Conn) SetWriteDeadline(t time.Time) error { return c.UDPSession.SetWriteDeadline(t) }
+
+func addrString(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	return addr.String()
+}

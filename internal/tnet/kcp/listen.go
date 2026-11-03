@@ -8,6 +8,7 @@ import (
 	"github.com/xtaci/smux"
 
 	"paqet/internal/conf"
+	"paqet/internal/metrics"
 	"paqet/internal/socket"
 	"paqet/internal/tnet"
 )
@@ -37,15 +38,23 @@ func Listen(cfg *conf.KCP, netCfg conf.Network) (tnet.Listener, error) {
 func (l *Listener) Accept() (tnet.Conn, error) {
 	conn, err := l.listener.AcceptKCP()
 	if err != nil {
+		metrics.IncFailure()
 		return nil, fmt.Errorf("kcp: failed to accept connection: %w", err)
 	}
 	aplConf(conn, l.cfg)
 	sess, err := smux.Server(conn, smuxConf(l.cfg))
 	if err != nil {
+		metrics.IncFailure()
 		conn.Close()
 		return nil, fmt.Errorf("kcp: failed to create smux session: %w", err)
 	}
-	return &Conn{nil, conn, sess}, nil
+	metrics.IncConnections()
+	metricsID := metrics.RegisterConnection(
+		addrString(conn.RemoteAddr()),
+		addrString(conn.LocalAddr()),
+	)
+	trackSession(conn, sess, metricsID)
+	return &Conn{UDPSession: conn, Session: sess, counted: true, metricsID: metricsID}, nil
 }
 
 func (l *Listener) Close() error {

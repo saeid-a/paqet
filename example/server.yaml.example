@@ -6,6 +6,22 @@ role: "server"
 log:
   level: "info"  # none, debug, info, warn, error, fatal
 
+# Control panel (web UI) + status API.
+# Open http://127.0.0.1:9090 for overview, connections, config editor, logs,
+# start/stop/restart and JSON at /api/status, /metrics.
+# Tabs: Targets (SOCKS/forward listeners), Diag (ping/dump, runtime/net info),
+# Backups (config history, keeps last 10).
+admin:
+  enabled: true
+  listen: "127.0.0.1:9090"
+  # token: "change-me-min-16-chars"  # optional bearer for /api/*
+  # tls_cert: ""  # optional paths for https panel
+  # tls_key: ""
+
+metrics:
+  enabled: false
+  listen: "127.0.0.1:9090"
+
 # Server listen configuration
 listen:
   addr: ":9999"   # CHANGE ME: Server listen port (must match network.ipv4.addr port)
@@ -30,6 +46,9 @@ network:
   # TCP flags for packet crafting (optional - will use defaults)
   tcp:
     local_flag: ["PA"]                       # Local TCP flags (Push+Ack default)
+    # handshake: true                        # Fake 3-way handshake (SYN-prime) for stateful
+                                             # NAT/firewalls. Default true; set false only to
+                                             # interoperate with peers that mishandle it.
 
   # PCAP settings (optional - will use defaults)
   # pcap:

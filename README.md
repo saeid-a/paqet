@@ -19,7 +19,7 @@ paqet operates on raw packets instead. It crafts TCP packets directly and uses p
 ### Prerequisites
 
 - `libpcap` development libraries must be installed on both the client and server machines.
-  - **Linux:** No prerequisites - binaries are statically linked.
+  - **Linux:** No prerequisites - libpcap is statically linked and the binary is fully static (musl), with no glibc runtime dependency.
   - **macOS:** Comes pre-installed with Xcode Command Line Tools. Install with `xcode-select --install`
   - **Windows:** Install Npcap. Download from [npcap.com](https://npcap.com/).
 
@@ -162,6 +162,27 @@ sudo iptables -t filter -A OUTPUT -p tcp --sport <PORT> -j ACCEPT
 
 These rules ensure that only the application handles traffic for the connection port.
 
+The client needs the mirror image of rule 2: the handshake elicits
+SYNACKs to ephemeral ports no kernel socket owns, and the kernel's RST
+reply tears down the NAT/firewall mapping the handshake just built
+(observed live as `[R]` immediately following an elicited SYNACK).
+Scope the suppression to the server address so unrelated traffic keeps
+normal reset behavior:
+
+```bash
+# Replace <SERVER_IP> with the paqet server address (e.g., 128.140.2.9)
+# and <PORT> with the paqet server port (e.g., 9999).
+# Run as root on the client (Linux):
+sudo iptables -t raw -A PREROUTING -s <SERVER_IP> -p tcp --sport <PORT> -j NOTRACK
+sudo iptables -t mangle -A OUTPUT -d <SERVER_IP> -p tcp --dport <PORT> --tcp-flags RST RST -j DROP
+```
+
+No application-code change is made for this: suppressing own-kernel
+resets portably would require the binary to manage host firewall rules
+itself (root- and platform-specific, with side effects beyond the
+handshake tuple), which is out of scope. Operator-applied scoped rules
+are the established mechanism.
+
 ### 3. Run `paqet`
 
 Make the downloaded binary executable (`chmod +x ./paqet_linux_amd64`). You will need root privileges to use raw sockets.
@@ -192,6 +213,76 @@ curl -v https://httpbin.org/ip --proxy socks5h://127.0.0.1:1080
 ```
 
 This request will be proxied over raw TCP packets to the server, and then forwarded according to the client mode configuration. The output should show your server's public IP address, confirming the connection is working.
+
+### 5. Control Panel (web UI)
+
+`paqet run` includes a lightweight, dependency-free control panel (single embedded HTML file, no JS frameworks).
+
+Enable it in `config.yaml`:
+
+```yaml
+admin:
+  enabled: true
+  listen: "127.0.0.1:9090"
+  # token: "change-me-min-16-chars"  # optional bearer for /api/*
+  # tls_cert: ""  # optional paths for https panel
+  # tls_key: ""
+```
+
+Then open `http://127.0.0.1:9090` (`https://` when `tls_cert`/`tls_key` are set). The legacy `metrics:` section still works as a fallback.
+
+What you get:
+
+- **Status**: role, uptime, throughput in/out (with 120s chart), packets, active conns/streams, success/failure table, version + config path.
+- **Connections**: live table with search filter.
+- **Targets**: SOCKS5/forward listeners and upstream targets.
+- **Diag**: ping/dump helpers plus runtime and network info (interfaces, Linux-only firewall check).
+- **Config**: view/edit raw YAML from the panel, validates before saving, `Save + Restart` to apply.
+- **Backups**: config history, keeps last 10 saves for rollback.
+- **Logs**: in-memory tail (1000 lines) with level filter and auto-refresh, plus live SSE stream.
+- **Setup**: preflight checklist with copy-paste firewall fixes plus security posture.
+- **Control**: `Start` / `Stop` / `Restart` buttons. The panel stays up while the core is stopped, so you can fix config and restart without SSH.
+
+JSON API (same server):
+
+| Method | Path | Description |
+| :----- | :--- | :---------- |
+| `GET` | `/metrics` | legacy status snapshot JSON (token-protected when `admin.token` is set) |
+| `GET` | `/api/status` | status + `running`, `config_path`, `build` |
+| `GET` / `PUT` | `/api/config` | raw YAML get/save (validates, `0600` file) |
+| `GET` / `POST` | `/api/config/backups` | list backups (`GET`) / save backup now (`POST {"action":"save"}` retention: 10) |
+| `POST` | `/api/config/restore` | restore backup (`{"file":"<basename>"}`) |
+| `POST` | `/api/control` | `{"action":"start"\|"stop"\|"restart"}` |
+| `POST` | `/api/core/drain` | drain active connections/streams |
+| `GET` | `/api/logs?tail=200&level=all` | in-memory logs |
+| `GET` | `/api/log` | log level get (`GET`) / set (`POST`/`PUT {"level":"info"}`) |
+| `GET` | `/api/logs/stream` | live logs via SSE (`text/event-stream`) |
+| `GET` | `/api/version` | version/build info |
+| `GET` | `/api/targets` | SOCKS5/forward listeners and targets |
+| `GET` | `/api/listeners` | bound listen addresses |
+| `GET` | `/api/runtime` | go runtime / process info |
+| `GET` | `/api/net/interfaces` | host network interfaces |
+| `GET` | `/api/net/firewall` | firewall/iptables check (Linux-only) |
+| `GET` | `/api/safety/posture` | security posture (exposure, bind, token/TLS) |
+| `GET` | `/api/safety/preflight` | launch-readiness checks plus firewall fix commands |
+| `POST` | `/api/config/validate` | dry-run config validation without writing (422 on error) |
+| `POST` | `/api/diag/ping` | connectivity probe (501 until wired to `paqet ping`) |
+| `POST` | `/api/diag/dump` | packet capture summary (501 until wired to `paqet dump`) |
+
+Auth: when `admin.token` is set (min 16 chars), every `/api/*` request (and `/metrics`) must send `Authorization: Bearer <token>`; the SSE stream also accepts `?token=` since EventSource cannot set headers. The UI prompts for the token and keeps it in `sessionStorage`. Without a token there is no auth.
+
+TLS: set `admin.tls_cert` + `admin.tls_key` (PEM paths) to serve the panel over HTTPS. Mixed HTTP/HTTPS on the same port is not supported — restart after changing.
+
+Live logs (SSE): `GET /api/logs/stream?level=all` returns `text/event-stream`. Reconnects automatically in the Logs tab.
+
+CSV export: status/targets tables support `?format=csv` (e.g., `/api/status?format=csv`, `/api/targets?format=csv`) for spreadsheet export.
+
+Backups: each successful `PUT /api/config` keeps a timestamped copy; `GET /api/config/backups` lists them, retention is 10 (oldest pruned automatically).
+
+Firewall check: `GET /api/net/firewall` inspects iptables/NOTRACK+RST-drop rules on Linux only; on macOS/Windows it returns `unsupported` — use the manual `iptables` steps in this README instead.
+
+> [!WARNING]
+> Bind to `127.0.0.1` and use SSH port-forwarding for remote boxes. Without `admin.token` + TLS there is no auth and no encryption — anyone with network access can read/edit config and stop the core. Never expose an unauthenticated panel to the internet.
 
 ## Command-Line Usage
 

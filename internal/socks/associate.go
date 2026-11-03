@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"paqet/internal/flog"
+	"paqet/internal/metrics"
 	"paqet/internal/pkg/buffer"
 	"paqet/internal/tnet"
 )
@@ -70,19 +71,33 @@ func (s *Server) serveUDP(ctx context.Context, a *associate) {
 	for {
 		n, cAddr, err := a.conn.ReadFromUDP(buf)
 		if err != nil {
+			if ctx.Err() == nil {
+				metrics.IncFailure()
+				metrics.IncFailureUDP()
+				metrics.IncFailureSOCKS()
+			}
 			return
 		}
 		if n == len(buf) {
 			flog.Debugf("SOCKS5 UDP %s: datagram too large, at least %d bytes", cAddr, n)
+			metrics.IncFailure()
+			metrics.IncFailureUDP()
+			metrics.IncFailureSOCKS()
 			continue
 		}
 		if !a.accept(cAddr) {
 			flog.Debugf("SOCKS5 UDP %s: unexpected source (want %s)", cAddr, a.cAddr.IP)
+			metrics.IncFailure()
+			metrics.IncFailureUDP()
+			metrics.IncFailureSOCKS()
 			continue
 		}
 		d, err := decodeDatagram(buf[:n])
 		if err != nil {
 			flog.Debugf("SOCKS5 UDP %s: malformed datagram: %v", cAddr, err)
+			metrics.IncFailure()
+			metrics.IncFailureUDP()
+			metrics.IncFailureSOCKS()
 			continue
 		}
 		s.udpToStrm(ctx, a, d)
@@ -92,33 +107,50 @@ func (s *Server) serveUDP(ctx context.Context, a *associate) {
 func (s *Server) udpToStrm(ctx context.Context, a *associate, d *datagram) {
 	if len(d.data) > buffer.UDPSize {
 		flog.Debugf("SOCKS5 UDP %s -> %s: payload too large, %d bytes", a.cAddr, d.address(), len(d.data))
+		metrics.IncFailure()
+		metrics.IncFailureUDP()
+		metrics.IncFailureSOCKS()
+		metrics.IncTarget(d.address(), 0, 0, false)
 		return
 	}
 
-	strm, new, k, err := s.client.UDP(ctx, a.cAddr.String(), d.address())
+	strm, new, k, err := s.client.UDP(ctx, a.cAddr.String(), s.effectiveTarget(d.address()))
 	if err != nil {
 		flog.Errorf("SOCKS5 failed to establish UDP stream for %s -> %s: %v", a.cAddr, d.address(), err)
+		metrics.IncFailure()
+		metrics.IncFailureUDP()
+		metrics.IncFailureSOCKS()
+		metrics.IncTarget(d.address(), 0, 0, false)
 		return
 	}
 
 	_, err = strm.Write(d.data)
 	if err != nil {
+		metrics.IncFailure()
+		metrics.IncFailureUDP()
+		metrics.IncFailureSOCKS()
+		metrics.IncTarget(d.address(), 0, 0, false)
 		s.client.CloseUDP(k, strm)
 		return
 	}
 	s.client.Touch(k)
+	metrics.IncSuccess()
+	metrics.IncSuccessUDP()
+	metrics.IncSuccessSOCKS()
+	metrics.IncTarget(d.address(), 0, uint64(len(d.data)), true)
 
 	if new {
 		flog.Infof("SOCKS5 accepted UDP connection %s -> %s", a.cAddr, d.address())
 		hdr := (&datagram{atyp: d.atyp, addr: d.addr, port: d.port}).bytes()
+		dest := d.address()
 		go func() {
 			defer s.client.CloseUDP(k, strm)
-			s.strmToUDP(ctx, strm, a, hdr, k)
+			s.strmToUDP(ctx, strm, a, hdr, k, dest)
 		}()
 	}
 }
 
-func (s *Server) strmToUDP(ctx context.Context, strm tnet.Strm, a *associate, hdr []byte, k uint64) {
+func (s *Server) strmToUDP(ctx context.Context, strm tnet.Strm, a *associate, hdr []byte, k uint64, dest string) {
 	stop := context.AfterFunc(ctx, func() { strm.Close() })
 	defer stop()
 
@@ -127,11 +159,26 @@ func (s *Server) strmToUDP(ctx context.Context, strm tnet.Strm, a *associate, hd
 	for {
 		n, err := strm.Read(buf[hlen:])
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			metrics.IncFailure()
+			metrics.IncFailureUDP()
+			metrics.IncFailureSOCKS()
+			metrics.IncTarget(dest, 0, 0, false)
 			return
 		}
 		s.client.Touch(k)
 		if _, err := a.conn.WriteToUDP(buf[:hlen+n], a.cAddr); err != nil {
+			metrics.IncFailure()
+			metrics.IncFailureUDP()
+			metrics.IncFailureSOCKS()
+			metrics.IncTarget(dest, uint64(n), 0, false)
 			return
 		}
+		metrics.IncSuccess()
+		metrics.IncSuccessUDP()
+		metrics.IncSuccessSOCKS()
+		metrics.IncTarget(dest, uint64(n), 0, true)
 	}
 }

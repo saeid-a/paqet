@@ -7,6 +7,7 @@ import (
 	"paqet/internal/conf"
 	"paqet/internal/flog"
 	"paqet/internal/pkg/iterator"
+	"paqet/internal/tnet/kcp"
 )
 
 type Client struct {
@@ -26,6 +27,7 @@ func New(cfg *conf.Conf) (*Client, error) {
 }
 
 func (c *Client) Start(ctx context.Context) error {
+	kcp.EnsureStatsLoop()
 	for i := range c.cfg.Transport.Conn {
 		tc, err := newTimedConn(c.cfg)
 		if err != nil {

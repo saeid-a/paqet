@@ -4,17 +4,64 @@ import (
 	"context"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"paqet/internal/client"
 	"paqet/internal/conf"
 	"paqet/internal/flog"
+	"paqet/internal/metrics"
 )
 
 type Server struct {
 	client   *client.Client
 	username string
 	password string
+	// egressSpec is the configured exit: "" = direct (respect the app's
+	// requested destination), otherwise a fixed "host:port". Dynamic
+	// specs ("@active", "forward:<listen>") are resolved at dial time
+	// via resolve, which the supervisor installs; resolve returning ""
+	// falls back to direct.
+	egressSpec atomic.Value // string
+	resolveMu  atomic.Value // func() string
+}
+
+func (s *Server) SetEgress(spec string) { s.egressSpec.Store(spec) }
+
+func (s *Server) Egress() string {
+	if v, ok := s.egressSpec.Load().(string); ok {
+		return v
+	}
+	return ""
+}
+
+// SetEgressSpec installs a (possibly dynamic) egress spec with a resolver
+// for "@active"/"forward:" specs. A nil resolve means the spec is literal.
+func (s *Server) SetEgressSpec(spec string, resolve func() string) {
+	s.egressSpec.Store(spec)
+	if resolve != nil {
+		s.resolveMu.Store(resolve)
+	}
+}
+
+// effectiveTarget returns the tunnel dial target for a SOCKS request:
+// the egress override when one resolves, else the requested destination.
+func (s *Server) effectiveTarget(requested string) string {
+	spec := s.Egress()
+	if spec == "" {
+		return requested
+	}
+	if r, ok := s.resolveMu.Load().(func() string); ok && r != nil {
+		if resolved := r(); resolved != "" {
+			return resolved
+		}
+		// Unresolvable dynamic spec (no active forward): fall through to
+		// the literal spec only when it is itself a dialable target.
+		if spec == "@active" || (len(spec) > 8 && spec[:8] == "forward:") {
+			return requested
+		}
+	}
+	return spec
 }
 
 func New(client *client.Client) (*Server, error) {
@@ -44,6 +91,9 @@ func (s *Server) serveTCP(ctx context.Context, listener net.Listener) {
 			case <-ctx.Done():
 				return
 			default:
+				metrics.IncFailure()
+				metrics.IncFailureTCP()
+				metrics.IncFailureSOCKS()
 				continue
 			}
 		}
@@ -59,11 +109,17 @@ func (s *Server) handleTCPConn(ctx context.Context, conn net.Conn) {
 	conn.SetDeadline(time.Now().Add(8 * time.Second))
 	if err := s.negotiate(conn); err != nil {
 		flog.Debugf("SOCKS5 negotiation with %s failed: %v", conn.RemoteAddr(), err)
+		metrics.IncFailure()
+		metrics.IncFailureTCP()
+		metrics.IncFailureSOCKS()
 		return
 	}
 	req, err := s.read(conn)
 	if err != nil {
 		flog.Debugf("SOCKS5 request from %s failed: %v", conn.RemoteAddr(), err)
+		metrics.IncFailure()
+		metrics.IncFailureTCP()
+		metrics.IncFailureSOCKS()
 		return
 	}
 	conn.SetDeadline(time.Time{})
@@ -77,6 +133,9 @@ func (s *Server) handleTCPConn(ctx context.Context, conn net.Conn) {
 		s.handleAssociate(ctx, conn, req)
 	default:
 		flog.Debugf("SOCKS5 unsupported command %d from %s", req.cmd, conn.RemoteAddr())
+		metrics.IncFailure()
+		metrics.IncFailureTCP()
+		metrics.IncFailureSOCKS()
 		s.write(conn, repCmdUnsupp)
 	}
 }
